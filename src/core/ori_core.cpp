@@ -196,7 +196,7 @@ bool OriAssistant::initialize() {
 }
 
 void OriAssistant::run() {
-    std::cout << "Ori Assistant v0.1\n";
+    std::cout << "ORI Terminal Assistant v0.2\n";
     std::cout << "Type 'help' for available commands or 'quit' to exit.\n\n";
     
     std::string input;
@@ -221,4 +221,11 @@ void OriAssistant::showHelp() {
     std::cout << "  quit     - Exit the assistant\n";
     std::cout << "  exit     - Exit the assistant\n";
     std::cout << "  Or type any query to send to the AI assistant\n\n";
+}
+
+std::string OriAssistant::processPrompt(const std::string& prompt) {
+    if (!api) {
+        return "Error: API not initialized";
+    }
+    return api->sendQuery(prompt);
 }

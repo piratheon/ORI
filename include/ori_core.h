@@ -37,6 +37,7 @@ public:
     bool initialize();
     void run();
     void showHelp();
+    std::string processPrompt(const std::string& prompt);
 };
 
 #endif // ORI_CORE_H
