@@ -20,7 +20,7 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::stri
 }
 #endif
 
-OpenRouterAPI::OpenRouterAPI() : default_model("deepseek-chat") {
+OpenRouterAPI::OpenRouterAPI() : default_model("dolphin-chat") {
     // Constructor
 }
 
@@ -83,7 +83,7 @@ std::string OpenRouterAPI::sendQuery(const std::string& prompt) {
     
     // Prepare the request data
     Json::Value request_data;
-    request_data["model"] = "tngtech/deepseek-r1t2-chimera:free";
+    request_data["model"] = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free";
     
     Json::Value message;
     message["role"] = "user";
