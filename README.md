@@ -28,8 +28,6 @@ Ori Assistant is a Linux-based TUI (Text User Interface) AI assistant that integ
 
 This project is currently at version 0.3.
 
-This is a prototype implementation that demonstrates the core architecture and functionality. The AI responses are currently simulated with placeholder text, but the structure is in place for integrating with the actual OpenRouter API.
-
 ### Core Components
 
 1. **OriAssistant**: Main TUI interface with command processing
@@ -68,16 +66,20 @@ The build script will automatically handle the build process and create the exec
 
 ### API Key Setup
 
-Ori Assistant can load your OpenRouter API key from multiple sources:
+1. **Get an Openrouter API Key**: from [here](https://openrouter.ai/settings/keys)
+2. **Set the key**:
 
-1. **Environment Variable**: Set `OPENROUTER_API_KEY` in your shell profile
-   ```bash
-   export OPENROUTER_API_KEY="your-api-key-here"
-   ```
-
-2. **Configuration File**: Create a file named `Openrouter_api_key.txt` in:
-   - Current directory
-   - `~/.config/ori/` directory
+   Ori Assistant can load your OpenRouter API key from multiple sources:
+   
+     #### 1. Environment Variable:
+     Set `OPENROUTER_API_KEY` in your shell profile:
+   
+      ```bash
+      export OPENROUTER_API_KEY="your-api-key-here"
+      ```
+   
+     #### 2. Configuration File:
+     Create a file named `Openrouter_api_key.txt` in `~/.config/ori/` directory
 
 ## Usage
 
@@ -100,7 +102,7 @@ Ori Assistant can load your OpenRouter API key from multiple sources:
 In the interactive mode:
 - Type any query to get a response
 - Type `help` to see available commands
-- Type `quit` or `exit` to exit
+- Type `quit` to exit
 
 ### Using the Plugin Manager (orpm)
 
@@ -125,8 +127,8 @@ In the interactive mode:
 
 ### Plugin Locations
 
-- **User Plugins**: `~/.local/share/Ori/plugins/`
-- **System Plugins**: `/usr/share/Ori/plugins/` (requires sudo access)
+- **User Plugins**: `~/.local/share/ori/plugins/`
+- **System Plugins**: `/usr/share/ori/plugins/` (requires sudo access)
 
 ### Plugin Database
 
@@ -158,21 +160,22 @@ Plugins are managed through a JSON database (`plugins/plugin_database.json`) tha
 
 ```
 ORI/
-├── build.sh                 # Build script
-├── CMakeLists.txt           # CMake configuration
-├── include/                 # Header files
-│   ├── ori_core.h           # Core assistant interface
-│   └── orpm.h               # Plugin manager interface
-├── plugins/                 # Plugin resources
-│   └── plugin_database.json # Plugin metadata
-├── src/                     # Source code
-│   ├── main.cpp             # Entry point
-│   ├── core/                # Core assistant implementation
-│   │   └── ori_core.cpp
-│   └── plugins/             # Plugin manager implementation
-│       └── orpm.cpp
-├── README.md                # This file
-└── LICENSE                  # License information
+├── build.sh                  # Build script
+├── CMakeLists.txt            # CMake configuration
+├── include                   # Header files
+│   ├── ori_core.h            # Core assistant interface
+│   └── orpm.h                # Plugin manager interface
+├── install.sh                # System-level install script
+├── LICENSE                   # License information
+├── plugins                   # Plugin resources
+│   └── plugin_database.json  # Plugin metadata example  
+├── README.md                 # This file :)
+└── src                       # Source code folder
+    ├── core                  # Core assistant ssource folder
+    │   └── ori_core.cpp      # Core assistant implementation
+    ├── main.cpp              # Entry point
+    └── plugins /             # Plugin manager implementation
+        └── orpm.cpp          # Plugin manager core       
 ```
 
 ### Core Components
@@ -200,16 +203,18 @@ ORI/
 
 # Test the assistant
 echo -e "hello\nexit" | ./build/ori
+#or:
+ori "hello"
 
 # Test the plugin manager
 ./build/ori --orpm --orpm-list
 ```
 
-## Future Enhancements
+## Future Enhancements (maybe on version 1.0?)
 
 ### Core Features
 - Full OpenRouter API integration with real AI responses
-- Google Gemini 2.0 integration for complex queries
+- Google Gemini 2.0 integration for complex queries 
 - Advanced command-line flag support
 - Configuration file support
 
