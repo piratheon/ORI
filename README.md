@@ -1,4 +1,11 @@
-# Ori Assistant
+    ███████    ███████████   █████            ███████████ █████  █████ █████
+  ███▒▒▒▒▒███ ▒▒███▒▒▒▒▒███ ▒▒███            ▒█▒▒▒███▒▒▒█▒▒███  ▒▒███ ▒▒███ 
+ ███     ▒▒███ ▒███    ▒███  ▒███            ▒   ▒███  ▒  ▒███   ▒███  ▒███ 
+▒███      ▒███ ▒██████████   ▒███  ██████████    ▒███     ▒███   ▒███  ▒███ 
+▒███      ▒███ ▒███▒▒▒▒▒███  ▒███ ▒▒▒▒▒▒▒▒▒▒     ▒███     ▒███   ▒███  ▒███ 
+▒▒███     ███  ▒███    ▒███  ▒███                ▒███     ▒███   ▒███  ▒███ 
+ ▒▒▒███████▒   █████   █████ █████               █████    ▒▒████████   █████
+   ▒▒▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒               ▒▒▒▒▒      ▒▒▒▒▒▒▒▒   ▒▒▒▒▒
 
 Ori Assistant is a Linux-based TUI (Text User Interface) AI assistant that integrates with OpenRouter API, offering powerful plugins, an advanced command-line interface, and modern UI capabilities. It is designed for both beginner and advanced users, with plugin support and a modular structure for easy extensions.
 
