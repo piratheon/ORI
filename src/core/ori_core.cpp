@@ -5,10 +5,20 @@
 #include <cstring>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sstream>
+
+// ANSI Color Codes
+const std::string RESET = "\033[0m";
+const std::string BOLD = "\033[1m";
+const std::string RED = "\033[31m";
+const std::string GREEN = "\033[32m";
+const std::string YELLOW = "\033[33m";
+const std::string BLUE = "\033[34m";
+const std::string MAGENTA = "\033[35m";
+const std::string CYAN = "\033[36m";
 
 #ifdef CURL_FOUND
 #include <curl/curl.h>
-#include <sstream>
 #include <iomanip>
 #include <json/json.h>
 
@@ -20,7 +30,7 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::stri
 }
 #endif
 
-OpenRouterAPI::OpenRouterAPI() : default_model("dolphin-chat") {
+OpenRouterAPI::OpenRouterAPI() {
     // Constructor
 }
 
@@ -28,12 +38,16 @@ OpenRouterAPI::~OpenRouterAPI() {
     // Destructor
 }
 
+void OpenRouterAPI::setSystemPrompt(const std::string& prompt) {
+    conversation_history.clear();
+    conversation_history.push_back({"system", prompt});
+}
+
 bool OpenRouterAPI::loadApiKey() {
     // First try to load from environment variable
     const char* env_key = std::getenv("OPENROUTER_API_KEY");
     if (env_key != nullptr && std::strlen(env_key) > 0) {
         api_key = std::string(env_key);
-        std::cout << "Loaded API key from environment variable" << std::endl;
         return true;
     }
     
@@ -43,7 +57,6 @@ bool OpenRouterAPI::loadApiKey() {
     if (file.is_open()) {
         std::getline(file, api_key);
         file.close();
-        std::cout << "Loaded API key from current directory file" << std::endl;
         return true;
     }
     
@@ -55,12 +68,10 @@ bool OpenRouterAPI::loadApiKey() {
         if (home_file.is_open()) {
             std::getline(home_file, api_key);
             home_file.close();
-            std::cout << "Loaded API key from home directory file" << std::endl;
             return true;
         }
     }
     
-    std::cout << "Failed to load API key" << std::endl;
     return false;
 }
 
@@ -75,22 +86,26 @@ std::string OpenRouterAPI::getApiKey() const {
 
 std::string OpenRouterAPI::sendQuery(const std::string& prompt) {
 #ifdef CURL_FOUND
+    // Add user's message to history
+    conversation_history.push_back({"user", prompt});
+
     // Initialize curl
     CURL* curl = curl_easy_init();
     if (!curl) {
-        return "Error: Failed to initialize curl";
+        return RED + "Error: Failed to initialize curl" + RESET;
     }
     
     // Prepare the request data
     Json::Value request_data;
     request_data["model"] = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free";
     
-    Json::Value message;
-    message["role"] = "user";
-    message["content"] = prompt;
-    
     Json::Value messages(Json::arrayValue);
-    messages.append(message);
+    for (const auto& msg : conversation_history) {
+        Json::Value message;
+        message["role"] = msg.role;
+        message["content"] = msg.content;
+        messages.append(message);
+    }
     request_data["messages"] = messages;
     
     Json::StreamWriterBuilder builder;
@@ -120,14 +135,32 @@ std::string OpenRouterAPI::sendQuery(const std::string& prompt) {
     curl_easy_cleanup(curl);
     
     if (res != CURLE_OK) {
-        return "Error: Failed to connect to OpenRouter API - " + std::string(curl_easy_strerror(res));
+        return RED + "Error: Failed to connect to OpenRouter API - " + std::string(curl_easy_strerror(res)) + RESET;
     }
     
     // Parse the response
     Json::Value response_json;
     Json::Reader reader;
     if (!reader.parse(response_data, response_json)) {
-        return "Error: Failed to parse API response - " + response_data;
+        return RED + "Error: Failed to parse API response - " + response_data + RESET;
+    }
+    
+    // Check for a structured error response
+    if (response_json.isMember("error")) {
+        std::string error_message = RED + "API Error";
+        const Json::Value& error_obj = response_json["error"];
+
+        if (error_obj.isMember("code") && error_obj["code"].isNumeric()) {
+            error_message += " (Code: " + error_obj["code"].asString() + ")";
+        }
+        if (error_obj.isMember("message") && error_obj["message"].isString()) {
+            error_message += ": " + error_obj["message"].asString();
+        }
+        if (error_obj.isMember("metadata") && error_obj["metadata"].isObject() &&
+            error_obj["metadata"].isMember("raw") && error_obj["metadata"]["raw"].isString()) {
+            error_message += " (Details: " + error_obj["metadata"]["raw"].asString() + ")";
+        }
+        return error_message + RESET;
     }
     
     // Extract the response text
@@ -135,9 +168,13 @@ std::string OpenRouterAPI::sendQuery(const std::string& prompt) {
         response_json["choices"].size() > 0 && 
         response_json["choices"][0].isMember("message") && 
         response_json["choices"][0]["message"].isMember("content")) {
-        return response_json["choices"][0]["message"]["content"].asString();
+        
+        std::string assistant_response = response_json["choices"][0]["message"]["content"].asString();
+        // Add assistant's response to history
+        conversation_history.push_back({"assistant", assistant_response});
+        return assistant_response;
     } else {
-        return "Error: Unexpected API response format - " + response_data;
+        return RED + "Error: Unexpected API response format - " + response_data + RESET;
     }
 #else
     // Fallback to placeholder implementation
@@ -181,6 +218,8 @@ OriAssistant::~OriAssistant() {
 #endif
 }
 
+
+
 bool OriAssistant::initialize() {
     // Create config directory if it doesn't exist
     const char* home_dir = std::getenv("HOME");
@@ -192,26 +231,116 @@ bool OriAssistant::initialize() {
         }
     }
     
-    return api->loadApiKey();
+    if (!api->loadApiKey()) {
+        std::cerr << RED << "Error: Failed to load API key. Please set OPENROUTER_API_KEY or create Openrouter_api_key.txt." << RESET << std::endl;
+        return false;
+    }
+    return true;
 }
 
 void OriAssistant::run() {
-    std::cout << "ORI Terminal Assistant v0.2\n";
+    std::cout << BLUE << R"(
+    ███████    ███████████   █████            ███████████ █████  █████ █████
+  ███▒▒▒▒▒███ ▒▒███▒▒▒▒▒███ ▒▒███            ▒█▒▒▒███▒▒▒█▒▒███  ▒▒███ ▒▒███ 
+ ███     ▒▒███ ▒███    ▒███  ▒███            ▒   ▒███  ▒  ▒███   ▒███  ▒███ 
+▒███      ▒███ ▒██████████   ▒███  ██████████    ▒███     ▒███   ▒███  ▒███ 
+▒███      ▒███ ▒███▒▒▒▒▒███  ▒███ ▒▒▒▒▒▒▒▒▒▒     ▒███     ▒███   ▒███  ▒███ 
+▒▒███     ███  ▒███    ▒███  ▒███                ▒███     ▒███   ▒███  ▒███ 
+ ▒▒▒███████▒   █████   █████ █████               █████    ▒▒████████   █████
+   ▒▒▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒               ▒▒▒▒▒      ▒▒▒▒▒▒▒▒   ▒▒▒▒▒
+)" << RESET << std::endl;
+    std::cout << BOLD << BLUE << "ORI Terminal Assistant v0.3" << RESET << "\n";
     std::cout << "Type 'help' for available commands or 'quit' to exit.\n\n";
     
     std::string input;
     while (true) {
-        std::cout << "> ";
+        std::cout << BOLD << GREEN << "> " << RESET;
         std::getline(std::cin, input);
+
+        if (std::cin.fail() || std::cin.eof()) {
+            break;
+        }
         
         if (input == "quit" || input == "exit") {
             break;
         } else if (input == "help") {
             showHelp();
         } else if (!input.empty()) {
-            std::string response = api->sendQuery(input);
-            std::cout << response << "\n\n";
+            processSingleRequest(input, false); // Interactive mode, no auto-confirm
         }
+    }
+}
+
+void OriAssistant::processSingleRequest(const std::string& prompt, bool auto_confirm) {
+    if (!api) {
+        std::cout << RED << "Error: API not initialized" << RESET << std::endl;
+        return;
+    }
+    std::string response = api->sendQuery(prompt);
+
+    size_t current_pos = 0;
+    while (true) {
+        size_t start_pos = response.find("[exec]", current_pos);
+        size_t end_pos = response.find("[/exec]", start_pos);
+
+        if (start_pos != std::string::npos && end_pos != std::string::npos) {
+            // Print any text before the command
+            if (start_pos > current_pos) {
+                std::cout << response.substr(current_pos, start_pos - current_pos);
+            }
+
+            start_pos += 6; // Move past "[exec]"
+            std::string command = response.substr(start_pos, end_pos - start_pos);
+            handleCommandExecution(command, auto_confirm);
+
+            current_pos = end_pos + 7; // Move past "[/exec]"
+        } else {
+            // Print any remaining text after the last command
+            if (current_pos < response.length()) {
+                std::cout << response.substr(current_pos) << "\n\n";
+            }
+            break;
+        }
+    }
+}
+
+void OriAssistant::handleCommandExecution(const std::string& command, bool auto_confirm) {
+    bool confirmed = false;
+    if (auto_confirm) {
+        confirmed = true;
+    } else {
+        std::cout << YELLOW << "Execute the following command? (y/n): " << RESET << BOLD << CYAN << "<< " << command << " >> " << RESET;
+        std::string confirmation;
+        std::getline(std::cin, confirmation);
+        if (confirmation == "y" || confirmation == "Y") {
+            confirmed = true;
+        }
+    }
+
+    if (confirmed) {
+        std::cout << MAGENTA << "Executing command: " << command << RESET << std::endl;
+        // Execute the command and capture output
+        std::string result = "";
+        FILE* pipe = popen(command.c_str(), "r");
+        if (!pipe) {
+            result = RED + "Error: could not execute command." + RESET;
+        } else {
+            char buffer[128];
+            while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+                result += buffer;
+            }
+            pclose(pipe);
+        }
+
+        // Formulate a new prompt and send it back to the AI
+        std::string feedback_prompt = "The command \"" + command + "\" produced the following output:\n---\n" + result + "\n---\nPlease summarize this output or answer the original question based on it.";
+        processSingleRequest(feedback_prompt, auto_confirm);
+
+    } else {
+        std::cout << YELLOW << "Command execution cancelled." << RESET << "\n\n";
+        // Inform the AI that the command was cancelled.
+        std::string cancel_prompt = "The user cancelled the command execution. Please inform the user that you cannot answer the question without running the command.";
+        api->sendQuery(cancel_prompt);
     }
 }
 
@@ -221,11 +350,4 @@ void OriAssistant::showHelp() {
     std::cout << "  quit     - Exit the assistant\n";
     std::cout << "  exit     - Exit the assistant\n";
     std::cout << "  Or type any query to send to the AI assistant\n\n";
-}
-
-std::string OriAssistant::processPrompt(const std::string& prompt) {
-    if (!api) {
-        return "Error: API not initialized";
-    }
-    return api->sendQuery(prompt);
 }

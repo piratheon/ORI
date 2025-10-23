@@ -9,10 +9,15 @@
 #include <curl/curl.h>
 #endif
 
+struct ChatMessage {
+    std::string role;
+    std::string content;
+};
+
 class OpenRouterAPI {
 private:
     std::string api_key;
-    std::string default_model;
+    std::vector<ChatMessage> conversation_history;
     
 public:
     OpenRouterAPI();
@@ -21,13 +26,14 @@ public:
     bool loadApiKey();
     bool setApiKey(const std::string& key);
     std::string getApiKey() const;
+    void setSystemPrompt(const std::string& prompt);
     
     std::string sendQuery(const std::string& prompt);
     std::string sendComplexQuery(const std::string& prompt);
 };
 
 class OriAssistant {
-private:
+public:
     std::unique_ptr<OpenRouterAPI> api;
     
 public:
@@ -37,7 +43,8 @@ public:
     bool initialize();
     void run();
     void showHelp();
-    std::string processPrompt(const std::string& prompt);
+    void processSingleRequest(const std::string& prompt, bool auto_confirm);
+    void handleCommandExecution(const std::string& command, bool auto_confirm);
 };
 
 #endif // ORI_CORE_H

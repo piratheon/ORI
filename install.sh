@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ORI Terminal Assistant Installation Script
-# This script installs ORI Terminal Assistant and sets up shell integration
+# This script installs ORI Terminal Assistant to /usr/share/ori and creates a symlink in /usr/bin
 
 set -e
 
@@ -12,12 +12,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}ORI Terminal Assistant v0.2 Installation Script${NC}"
+echo -e "${BLUE}ORI Terminal Assistant v0.3 Installation Script${NC}"
+echo "This script will prompt for your password to install files into /usr."
 echo "================================================"
 
 # Check if we're in the right directory
 if [ ! -f "CMakeLists.txt" ] || [ ! -f "src/main.cpp" ]; then
-    echo -e "${RED}Error: Please run this script from the ORI-CPP directory${NC}"
+    echo -e "${RED}Error: Please run this script from the project's root directory${NC}"
     exit 1
 fi
 
@@ -41,77 +42,35 @@ fi
 
 echo -e "${GREEN}Build successful!${NC}"
 
-# Install to system
-echo -e "${YELLOW}Installing ORI Terminal Assistant to system...${NC}"
+# --- Installation ---
+INSTALL_DIR="/usr/share/ori"
+BIN_DIR="/usr/bin"
 
-# Create directories
-sudo mkdir -p /usr/local/bin
-sudo mkdir -p /usr/local/share/ori
-sudo mkdir -p /etc/ori
+echo -e "${YELLOW}Installing ORI to $INSTALL_DIR...${NC}"
 
-# Copy executable
-sudo cp build/ori /usr/local/bin/ori
-sudo chmod +x /usr/local/bin/ori
+# Create installation directory
+sudo mkdir -p "$INSTALL_DIR"
+
+# Copy executable and prompt file
+sudo cp build/ori "$INSTALL_DIR/ori"
 
 # Copy plugin database
 if [ -d "plugins" ]; then
-    sudo cp -r plugins/* /usr/local/share/ori/
+    sudo cp -r plugins/* "$INSTALL_DIR/"
 fi
 
-# Create configuration directory for user
-mkdir -p ~/.config/ori
+# Create symbolic link
+echo -e "${YELLOW}Creating symbolic link in $BIN_DIR...${NC}"
+sudo ln -sf "$INSTALL_DIR/ori" "$BIN_DIR/ori"
 
-echo -e "${GREEN}Installation complete!${NC}"
-
-# Setup shell integration
-echo -e "${YELLOW}Setting up shell integration...${NC}"
-
-# Detect shell
-SHELL_NAME=$(basename "$SHELL")
-SHELL_RC=""
-
-case "$SHELL_NAME" in
-    "bash")
-        SHELL_RC="$HOME/.bashrc"
-        ;;
-    "zsh")
-        SHELL_RC="$HOME/.zshrc"
-        ;;
-    "fish")
-        SHELL_RC="$HOME/.config/fish/config.fish"
-        ;;
-    *)
-        echo -e "${YELLOW}Warning: Unsupported shell '$SHELL_NAME'. You may need to manually add the alias.${NC}"
-        ;;
-esac
-
-if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
-    # Check if alias already exists
-    if ! grep -q "alias ori=" "$SHELL_RC"; then
-        echo "" >> "$SHELL_RC"
-        echo "# ORI Terminal Assistant alias" >> "$SHELL_RC"
-        echo "alias ori='/usr/local/bin/ori'" >> "$SHELL_RC"
-        echo -e "${GREEN}Added 'ori' alias to $SHELL_RC${NC}"
-    else
-        echo -e "${YELLOW}Alias 'ori' already exists in $SHELL_RC${NC}"
-    fi
-fi
+# Create configuration directory for user (as the user, not root)
+echo -e "${YELLOW}Creating user configuration directory...${NC}"
+mkdir -p "$HOME/.config/ori"
 
 echo ""
 echo -e "${GREEN}================================================"
-echo -e "ORI Terminal Assistant v0.2 Installation Complete!"
+echo -e "ORI Terminal Assistant Installation Complete!${NC}"
 echo -e "================================================${NC}"
 echo ""
-echo -e "${BLUE}Usage Examples:${NC}"
-echo "  ori 'print current active username'"
-echo "  ori print current active username"
-echo "  ori --load-prompt /path/to/prompt.md"
-echo "  ori --help"
-echo ""
-echo -e "${YELLOW}Note: You may need to restart your shell or run 'source $SHELL_RC' to use the 'ori' command.${NC}"
-echo ""
-echo -e "${BLUE}Configuration:${NC}"
-echo "  Set your OpenRouter API key:"
-echo "    export OPENROUTER_API_KEY='your-api-key-here'"
-echo "  Or create ~/.config/ori/Openrouter_api_key.txt with your API key"
-echo ""
+echo -e "${BLUE}Usage:${NC}"
+ori --help

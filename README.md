@@ -4,15 +4,20 @@ Ori Assistant is a Linux-based TUI (Text User Interface) AI assistant that integ
 
 ## Features
 
+- **Agentic Command Execution**: The AI can intelligently decide to run shell commands to answer questions or perform tasks. For safety, it always asks for user confirmation in interactive mode.
 - **TUI AI Assistant**: Text-based interface for interacting with AI models
 - **OpenRouter API Integration**: Connects to various AI models through OpenRouter
 - **Default Model**: Deepseek R1 Free as the default AI model
 - **Plugin System**: Extensible architecture with plugin support
 - **Orpm Plugin Manager**: Built-in package manager for plugins with JSON-based plugin database
 - **Secure API Key Handling**: Multiple options for secure API key storage
+- **Session Context**: Remembers conversation history in interactive mode
+- **System Prompt**: Loads a system prompt from `ori-system-prompt.md` to set the AI's persona
 - **Cross-Platform Build System**: CMake-based build system with dependency management
 
 ## Current Implementation Status
+
+This project is currently at version 0.3.
 
 This is a prototype implementation that demonstrates the core architecture and functionality. The AI responses are currently simulated with placeholder text, but the structure is in place for integrating with the actual OpenRouter API.
 
@@ -78,6 +83,9 @@ Ori Assistant can load your OpenRouter API key from multiple sources:
 
 # Show version
 ./build/ori --version
+
+# Run a non-interactive command, auto-approving any shell execution
+./build/ori -y "install nmap for me"
 ```
 
 In the interactive mode:

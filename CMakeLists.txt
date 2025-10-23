@@ -5,6 +5,10 @@ project(OriAssistant)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Define installation data directory
+set(ORI_DATA_DIR "/usr/share/ori")
+add_definitions(-DORI_DATA_DIR="${ORI_DATA_DIR}")
+
 # Add include directories
 include_directories(include)
 
@@ -54,6 +58,9 @@ endif()
 # if(CURL_FOUND)
 #     target_link_libraries(ori ${CURL_LIBRARIES})
 # endif()
+
+# Copy system prompt into build directory
+
 
 # Install targets
 install(TARGETS ori DESTINATION bin)
