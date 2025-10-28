@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}ORI Terminal Assistant v0.3 Installation Script${NC}"
+echo -e "${BLUE}ORI Terminal Assistant v0.4 Installation Script${NC}"
 echo "This script will prompt for your password to install files into /usr."
 echo "================================================"
 
@@ -62,6 +62,7 @@ fi
 # Create symbolic link
 echo -e "${YELLOW}Creating symbolic link in $BIN_DIR...${NC}"
 sudo ln -sf "$INSTALL_DIR/ori" "$BIN_DIR/ori"
+install -D orpm /usr/bin/orpm
 
 # Create configuration directory for user (as the user, not root)
 echo -e "${YELLOW}Creating user configuration directory...${NC}"

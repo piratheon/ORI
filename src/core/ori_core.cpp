@@ -38,6 +38,33 @@ OpenRouterAPI::~OpenRouterAPI() {
     // Destructor
 }
 
+std::string OpenRouterAPI::getMotherboardFingerprint() {
+    std::string result = "";
+    FILE* pipe = popen("sudo dmidecode -s baseboard-serial-number", "r");
+    if (!pipe) {
+        return "";
+    }
+    char buffer[128];
+    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+        result += buffer;
+    }
+    pclose(pipe);
+    result.erase(result.find_last_not_of(" \n\r\t")+1);
+    return result;
+}
+
+std::string OpenRouterAPI::encrypt(const std::string& data, const std::string& key) {
+    std::string result = data;
+    for (size_t i = 0; i < data.size(); ++i) {
+        result[i] = data[i] ^ key[i % key.size()];
+    }
+    return result;
+}
+
+std::string OpenRouterAPI::decrypt(const std::string& data, const std::string& key) {
+    return encrypt(data, key);
+}
+
 void OpenRouterAPI::setSystemPrompt(const std::string& prompt) {
     conversation_history.clear();
     conversation_history.push_back({"system", prompt});
@@ -52,26 +79,48 @@ bool OpenRouterAPI::loadApiKey() {
     }
     
     // Then try to load from file
-    std::string key_file = "Openrouter_api_key.txt";
-    std::ifstream file(key_file);
-    if (file.is_open()) {
-        std::getline(file, api_key);
-        file.close();
-        return true;
-    }
-    
-    // Try to load from home directory
     const char* home_dir = std::getenv("HOME");
     if (home_dir != nullptr) {
-        std::string home_key_file = std::string(home_dir) + "/.config/ori/Openrouter_api_key.txt";
-        std::ifstream home_file(home_key_file);
-        if (home_file.is_open()) {
-            std::getline(home_file, api_key);
-            home_file.close();
-            return true;
+        std::string key_file = std::string(home_dir) + "/.config/ori/key";
+        std::ifstream file(key_file);
+        if (file.is_open()) {
+            std::string encrypted_key;
+            std::getline(file, encrypted_key);
+            file.close();
+            std::string fingerprint = getMotherboardFingerprint();
+            if (!fingerprint.empty()) {
+                api_key = decrypt(encrypted_key, fingerprint);
+                if (api_key.length() > 0) { 
+                    return true;
+                }
+            }
+            std::cout << YELLOW << "Failed to decrypt API key. It might be corrupted or the motherboard has been changed." << RESET << std::endl;
         }
     }
     
+    // If no key is found or decryption fails, ask the user for it
+    std::cout << "Please enter your OpenRouter API key: ";
+    std::string key;
+    std::getline(std::cin, key);
+    if (key.empty()) {
+        return false;
+    }
+
+    std::string fingerprint = getMotherboardFingerprint();
+    if (!fingerprint.empty()) {
+        std::string encrypted_key = encrypt(key, fingerprint);
+        if (home_dir != nullptr) {
+            std::string key_file = std::string(home_dir) + "/.config/ori/key";
+            std::ofstream file(key_file);
+            if (file.is_open()) {
+                file << encrypted_key;
+                file.close();
+                api_key = key;
+                return true;
+            }
+        }
+    }
+
     return false;
 }
 
@@ -178,15 +227,7 @@ std::string OpenRouterAPI::sendQuery(const std::string& prompt) {
     }
 #else
     // Fallback to placeholder implementation
-    if (prompt == "hello") {
-        return "Hello! How can I assist you today?";
-    } else if (prompt == "help") {
-        return "I can help you with various tasks. Try asking me questions or giving me commands.";
-    } else if (prompt == "test") {
-        return "This is a test response from the AI assistant.";
-    } else {
-        return "I received your message: '" + prompt + "'. In a full implementation, I would provide a more detailed response based on the AI model.";
-    }
+    return "I received your message: '" + prompt + "'. In a full implementation, I would provide a more detailed response based on the AI model.";
 #endif
 }
 
@@ -239,7 +280,8 @@ bool OriAssistant::initialize() {
 }
 
 void OriAssistant::run() {
-    std::cout << BLUE << R"(
+    checkForUpdates(true);
+    std::cout << BLUE << R"( 
     ███████    ███████████   █████            ███████████ █████  █████ █████
   ███▒▒▒▒▒███ ▒▒███▒▒▒▒▒███ ▒▒███            ▒█▒▒▒███▒▒▒█▒▒███  ▒▒███ ▒▒███ 
  ███     ▒▒███ ▒███    ▒███  ▒███            ▒   ▒███  ▒  ▒███   ▒███  ▒███ 
@@ -249,8 +291,8 @@ void OriAssistant::run() {
  ▒▒▒███████▒   █████   █████ █████               █████    ▒▒████████   █████
    ▒▒▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒               ▒▒▒▒▒      ▒▒▒▒▒▒▒▒   ▒▒▒▒▒
 )" << RESET << std::endl;
-    std::cout << BOLD << BLUE << "ORI Terminal Assistant v0.3" << RESET << "\n";
-    std::cout << "Type 'help' for available commands or 'quit' to exit.\n\n";
+    std::cout << BOLD << BLUE << "ORI Terminal Assistant v0.4" << RESET << "\n";
+    std::cout << "Type '/help' for available commands or '/quit' to exit.\n\n";
     
     std::string input;
     while (true) {
@@ -261,10 +303,16 @@ void OriAssistant::run() {
             break;
         }
         
-        if (input == "quit" || input == "exit") {
-            break;
-        } else if (input == "help") {
-            showHelp();
+        if (input.rfind('/', 0) == 0) {
+            if (input == "/quit" || input == "/exit") {
+                break;
+            } else if (input == "/help") {
+                showHelp();
+            } else if (input == "/clear") {
+                std::system("clear");
+            } else {
+                std::cout << RED << "Unknown command: " << input << RESET << std::endl;
+            }
         } else if (!input.empty()) {
             processSingleRequest(input, false); // Interactive mode, no auto-confirm
         }
@@ -344,10 +392,79 @@ void OriAssistant::handleCommandExecution(const std::string& command, bool auto_
     }
 }
 
+void OriAssistant::setExecutablePath(const std::string& path) {
+    executable_path = path;
+}
+
+void OriAssistant::checkForUpdates(bool silent) {
+    #ifdef CURL_FOUND
+    CURL* curl = curl_easy_init();
+    if (curl) {
+        std::string version_url = "https://raw.githubusercontent.com/piratheon/ORI/refs/heads/main/.version";
+        std::string remote_version;
+        curl_easy_setopt(curl, CURLOPT_URL, version_url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &remote_version);
+        CURLcode res = curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+
+        if (res == CURLE_OK) {
+            std::ifstream version_file(".version");
+            std::string current_version = "0.4";
+            if (version_file.is_open()) {
+                std::getline(version_file, current_version);
+                version_file.close();
+            }
+            remote_version.erase(remote_version.find_last_not_of(" \n\r\t")+1);
+            if (current_version != remote_version) {
+                if (silent) {
+                    std::cout << YELLOW << "A new version of Ori is available: " << remote_version << RESET << std::endl;
+                    std::cout << "Run " << BOLD << "ori --check-for-updates" << RESET << " to update." << std::endl;
+                } else {
+                    std::cout << YELLOW << "A new version of Ori is available: " << remote_version << RESET << std::endl;
+                    std::cout << "Do you want to update? (y/n): ";
+                    std::string confirmation;
+                    std::getline(std::cin, confirmation);
+                    if (confirmation == "y" || confirmation == "Y") {
+                        std::string download_url = "https://github.com/piratheon/ORI/releases/download/v" + remote_version + "/ori-linux_x86-64-v" + remote_version + ".bin";
+                        std::string temp_file = "/tmp/ori_update.bin";
+                        CURL* download_curl = curl_easy_init();
+                        if (download_curl) {
+                            FILE* fp = fopen(temp_file.c_str(), "wb");
+                            if (fp) {
+                                curl_easy_setopt(download_curl, CURLOPT_URL, download_url.c_str());
+                                curl_easy_setopt(download_curl, CURLOPT_WRITEFUNCTION, NULL);
+                                curl_easy_setopt(download_curl, CURLOPT_WRITEDATA, fp);
+                                CURLcode download_res = curl_easy_perform(download_curl);
+                                fclose(fp);
+                                if (download_res == CURLE_OK) {
+                                    chmod(temp_file.c_str(), 0755);
+                                    if (rename(temp_file.c_str(), executable_path.c_str()) == 0) {
+                                        std::cout << GREEN << "Update successful! Restarting Ori..." << RESET << std::endl;
+                                        char* const argv[] = {const_cast<char*>(executable_path.c_str()), NULL};
+                                        execv(executable_path.c_str(), argv);
+                                    } else {
+                                        std::cout << RED << "Failed to replace the old binary." << RESET << std::endl;
+                                    }
+                                } else {
+                                    std::cout << RED << "Failed to download the update." << RESET << std::endl;
+                                }
+                            }
+                            curl_easy_cleanup(download_curl);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #endif
+}
+
 void OriAssistant::showHelp() {
     std::cout << "Available commands:\n";
-    std::cout << "  help     - Show this help message\n";
-    std::cout << "  quit     - Exit the assistant\n";
-    std::cout << "  exit     - Exit the assistant\n";
+    std::cout << "  /help     - Show this help message\n";
+    std::cout << "  /quit     - Exit the assistant\n";
+    std::cout << "  /exit     - Exit the assistant\n";
+    std::cout << "  /clear    - Clear the screen\n";
     std::cout << "  Or type any query to send to the AI assistant\n\n";
 }

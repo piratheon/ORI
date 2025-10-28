@@ -13,20 +13,23 @@ Ori Assistant is a Linux-based TUI (Text User Interface) AI assistant that integ
 
 ## Features
 
+- **Slash Commands**: Internal commands are now prefixed with a forward slash (e.g., `/help`, `/quit`).
+- **Secure API Key Handling**: API key is encrypted and stored in `~/.config/ori/key` using the motherboard's fingerprint for added security.
+- **Clear Command**: A `/clear` command has been added to clear the terminal screen.
+- **Update Check**: The assistant now silently checks for updates on startup and provides a `--check-for-updates` flag for manual checks. The update process now downloads the pre-compiled binary.
 - **Agentic Command Execution**: The AI can intelligently decide to run shell commands to answer questions or perform tasks. For safety, it always asks for user confirmation in interactive mode.
 - **TUI AI Assistant**: Text-based interface for interacting with AI models
 - **OpenRouter API Integration**: Connects to various AI models through OpenRouter
 - **Default Model**: Deepseek R1 Free as the default AI model
 - **Plugin System**: Extensible architecture with plugin support
 - **Orpm Plugin Manager**: Built-in package manager for plugins with JSON-based plugin database
-- **Secure API Key Handling**: Multiple options for secure API key storage
 - **Session Context**: Remembers conversation history in interactive mode
-- **System Prompt**: Loads a system prompt from `ori-system-prompt.md` to set the AI's persona
+- **System Prompt**: The system prompt is now a constant string in the C++ code.
 - **Cross-Platform Build System**: CMake-based build system with dependency management
 
 ## Current Implementation Status
 
-This project is currently at version 0.3.
+This project is currently at version 0.4.
 
 ### Core Components
 
@@ -78,8 +81,8 @@ The build script will automatically handle the build process and create the exec
       export OPENROUTER_API_KEY="your-api-key-here"
       ```
    
-     #### 2. Configuration File:
-     Create a file named `Openrouter_api_key.txt` in `~/.config/ori/` directory
+     #### 2. Encrypted File:
+     Run `ori` for the first time and it will ask you to enter your API key, which will be encrypted and stored in `~/.config/ori/key`.
 
 ## Usage
 
@@ -101,26 +104,29 @@ The build script will automatically handle the build process and create the exec
 
 In the interactive mode:
 - Type any query to get a response
-- Type `help` to see available commands
-- Type `quit` to exit
+- Type `/help` to see available commands
+- Type `/quit` to exit
+- Type `/clear` to clear the screen
 
 ### Using the Plugin Manager (orpm)
 
+`orpm` is now a separate bash script that wraps the `ori --orpm` command.
+
 ```bash
 # List available plugins
-./build/ori --orpm --orpm-list
+orpm --orpm-list
 
 # List installed plugins
-./build/ori --orpm --orpm-list-installed
+orpm --orpm-list-installed
 
 # Search for plugins
-./build/ori --orpm --orpm-search "voice"
+orpm --orpm-search "voice"
 
 # Install a plugin (placeholder implementation)
-./build/ori --orpm --orpm-install "voice-chat"
+orpm --orpm-install "voice-chat"
 
 # Remove a plugin (placeholder implementation)
-./build/ori --orpm --orpm-remove "voice-chat"
+orpm --orpm-remove "voice-chat"
 ```
 
 ## Plugin System
