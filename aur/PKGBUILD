@@ -1,11 +1,11 @@
 # Maintainer: Piratheon <piratheon@example.com>
-pkgname=ori
+pkgname=ORI
 pkgver=0.5
 pkgrel=1
 pkgdesc="ORI Terminal Assistant - terminal AI assistant"
 arch=(x86_64)
 url="https://github.com/piratheon/ORI"
-license=(MIT)
+license=(GPL3)
 depends=(curl jsoncpp)
 makedepends=(cmake gcc make pkg-config)
 source=("https://github.com/piratheon/ORI/archive/refs/tags/v${pkgver}.tar.gz")
