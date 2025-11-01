@@ -20,7 +20,7 @@ Ori Assistant is a Linux-based TUI (Text User Interface) AI assistant that integ
 - **Agentic Command Execution**: The AI can intelligently decide to run shell commands to answer questions or perform tasks. For safety, it always asks for user confirmation in interactive mode.
 - **TUI AI Assistant**: Text-based interface for interacting with AI models
 - **OpenRouter API Integration**: Connects to various AI models through OpenRouter
-- **Default Model**: Deepseek R1 Free as the default AI model
+- **Default Model**: Dolphin-mistral-24b (venice edition) as the default AI model
 - **Plugin System**: Extensible architecture with plugin support
 - **Orpm Plugin Manager**: Built-in package manager for plugins with JSON-based plugin database
 - **Session Context**: Remembers conversation history in interactive mode
