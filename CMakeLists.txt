@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(OriAssistant)
 
 # Set C++ standard
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Define installation data directory
@@ -16,6 +16,7 @@ include_directories(include)
 set(SOURCES
     src/main.cpp
     src/core/ori_core.cpp
+    src/core/ori_edit.cpp
     src/plugins/orpm.cpp
 )
 
@@ -23,35 +24,27 @@ set(SOURCES
 add_executable(ori ${SOURCES})
 
 # Find required packages
-find_package(PkgConfig)
-if(PKG_CONFIG_FOUND)
-    pkg_check_modules(JSONCPP jsoncpp)
-    pkg_check_modules(CURL libcurl)
-endif()
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(JSONCPP REQUIRED jsoncpp)
+pkg_check_modules(CURL REQUIRED libcurl)
 
-# Include directories
+# Include directories and compile definitions
 if(JSONCPP_FOUND)
-    include_directories(${JSONCPP_INCLUDE_DIRS})
-    add_definitions(-DJSONCPP_FOUND)
+    target_include_directories(ori PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_compile_definitions(ori PRIVATE JSONCPP_FOUND)
+else()
+    message(FATAL_ERROR "jsoncpp is required to build ORI")
 endif()
 
 if(CURL_FOUND)
-    include_directories(${CURL_INCLUDE_DIRS})
-    add_definitions(-DCURL_FOUND)
+    target_include_directories(ori PRIVATE ${CURL_INCLUDE_DIRS})
+    target_compile_definitions(ori PRIVATE CURL_FOUND)
+else()
+    message(FATAL_ERROR "libcurl is required to build ORI")
 endif()
 
 # Link libraries
-if(JSONCPP_FOUND)
-    target_link_libraries(ori ${JSONCPP_LIBRARIES})
-else()
-    message(WARNING "jsoncpp not found, plugin database loading may not work")
-endif()
-
-if(CURL_FOUND)
-    target_link_libraries(ori ${CURL_LIBRARIES})
-else()
-    message(WARNING "libcurl not found, API calls will not work")
-endif()
+target_link_libraries(ori PRIVATE ${JSONCPP_LIBRARIES} ${CURL_LIBRARIES} stdc++fs)
 
 # Additional libraries that might be needed
 # find_package(CURL)
@@ -64,4 +57,12 @@ endif()
 
 # Install targets
 install(TARGETS ori DESTINATION bin)
+install(FILES orpm DESTINATION bin)
+
+# Install additional data files for packaging
 install(DIRECTORY plugins/ DESTINATION share/Ori/plugins OPTIONAL)
+install(FILES LICENSE DESTINATION share/Ori)
+install(DIRECTORY include/ DESTINATION include/ori OPTIONAL)
+
+# Provide a CMake install config (optional simple staging)
+include(GNUInstallDirs)

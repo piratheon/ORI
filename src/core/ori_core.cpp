@@ -6,6 +6,11 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sstream>
+#include <termios.h>
+#include <unistd.h>
+#include <vector>
+#include <cstdio>
+#include <filesystem>
 
 // ANSI Color Codes
 const std::string RESET = "\033[0m";
@@ -20,7 +25,6 @@ const std::string CYAN = "\033[36m";
 #ifdef CURL_FOUND
 #include <curl/curl.h>
 #include <iomanip>
-#include <json/json.h>
 
 // Callback function to write response data to a string
 static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* response) {
@@ -29,6 +33,206 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::stri
     return total_size;
 }
 #endif
+#include <json/json.h>
+#include <dirent.h>
+#include "ori_edit.h"
+
+std::string OriAssistant::readInput() {
+    const std::string prompt = "> ";
+    std::string buffer;
+    size_t cursor = 0;
+
+    // Save terminal state
+    struct termios orig_termios;
+    if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) {
+        // fallback to simple getline
+        std::string line;
+        if (!std::getline(std::cin, line)) {
+            return "";
+        }
+        return line;
+    }
+
+    struct termios raw = orig_termios;
+    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw.c_iflag &= ~(IXON | ICRNL | BRKINT | INPCK | ISTRIP);
+    raw.c_oflag &= ~(OPOST);
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+
+    auto refresh = [&]() {
+        // Move to start of input area
+        printf("\r");
+        
+        // Calculate cursor position
+        size_t cursor_line = 0;
+        size_t cursor_col = 0;
+        
+        // Count lines before cursor
+        for (size_t i = 0; i < cursor; i++) {
+            if (buffer[i] == '\n') {
+                cursor_line++;
+                cursor_col = 0;
+            } else {
+                cursor_col++;
+            }
+        }
+        
+        // Clear from cursor to end of screen
+        printf("\033[J");
+        
+        // Print buffer contents with line tracking
+        size_t current_line = 0;
+        
+        // Print first prompt and first line
+        printf("%s", prompt.c_str());
+        size_t i = 0;
+        while (i < buffer.size() && buffer[i] != '\n') {
+            putchar(buffer[i++]);
+        }
+        
+        // Print remaining lines
+        while (i < buffer.size()) {
+            if (buffer[i] == '\n') {
+                putchar('\n');
+                printf("%s", prompt.c_str());
+                current_line++;
+                i++;
+                // Print rest of the line
+                while (i < buffer.size() && buffer[i] != '\n') {
+                    putchar(buffer[i++]);
+                }
+            }
+        }
+        
+        // Return cursor to correct position
+        if (current_line > cursor_line) {
+            printf("\033[%zuA", current_line - cursor_line);
+        }
+        
+        // Set correct column position
+        printf("\r");
+        if (cursor_col > 0 || prompt.size() > 0) {
+            printf("\033[%zuC", prompt.size() + cursor_col);
+        }
+        
+        fflush(stdout);
+    };
+
+    refresh();
+
+    while (true) {
+        char c = 0;
+        if (read(STDIN_FILENO, &c, 1) <= 0) {
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+            std::cin.setstate(std::ios::eofbit);
+            printf("\n");
+            return "";
+        }
+
+        if (c == '\r' || c == '\n') {
+            printf("\n");  // Just move to next line
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+            return buffer;
+        } else if (c == 0x7f || c == 8) { // Backspace
+            if (cursor > 0) {
+                buffer.erase(cursor - 1, 1);
+                cursor--;
+            }
+            refresh();
+        } else if (c == 0x03) { // Ctrl-C
+            buffer.clear();
+            cursor = 0;
+            printf("\n");
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+            return std::string();
+        } else if (c == 0x04) { // Ctrl-D
+            if (buffer.empty()) {
+                tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+                std::cin.setstate(std::ios::eofbit);
+                printf("\n");
+                exit(0);
+            }
+        } else if (c == 0x01) { // Ctrl-A -> start
+            cursor = 0;
+            refresh();
+        } else if (c == 0x05) { // Ctrl-E -> end
+            cursor = buffer.size();
+            refresh();
+        } else if (c == 0x15) { // Ctrl-U -> delete to start
+            buffer.erase(0, cursor);
+            cursor = 0;
+            refresh();
+        } else if (c == 0x17) { // Ctrl-W -> delete previous word
+            if (cursor == 0) { refresh(); continue; }
+            size_t i = cursor;
+            while (i > 0 && buffer[i-1] == ' ') i--;
+            while (i > 0 && buffer[i-1] != ' ') i--;
+            buffer.erase(i, cursor - i);
+            cursor = i;
+            refresh();
+        } else if (c == 0x1b) { // ESC sequences (arrows / Alt+key word movement)
+            char c2 = 0;
+            if (read(STDIN_FILENO, &c2, 1) <= 0) continue;
+
+            // Handle CSI sequences (arrow keys, Home/End, etc.)
+            if (c2 == '[') {
+                char c3 = 0;
+                if (read(STDIN_FILENO, &c3, 1) <= 0) continue;
+                if (c3 >= '0' && c3 <= '9') {
+                    std::string num;
+                    num.push_back(c3);
+                    char c4 = 0;
+                    while (read(STDIN_FILENO, &c4, 1) > 0) {
+                        if (c4 == '~') break;
+                        num.push_back(c4);
+                    }
+                    if (num == "1") cursor = 0;
+                    else if (num == "4" || num == "7") cursor = buffer.size();
+                    refresh();
+                    continue;
+                } else {
+                    if (c3 == 'D') { // Left
+                        if (cursor > 0) cursor--;
+                        refresh();
+                        continue;
+                    } else if (c3 == 'C') { // Right
+                        if (cursor < buffer.size()) cursor++;
+                        refresh();
+                        continue;
+                    } else if (c3 == 'H') { // Home
+                        cursor = 0; refresh(); continue;
+                    } else if (c3 == 'F') { // End
+                        cursor = buffer.size(); refresh(); continue;
+                    }
+                }
+            } else {
+                // Alt+<key> sequences: support Alt+b / Alt+f for word movement
+                if (c2 == 'b') { // word left (Alt+b)
+                    if (cursor == 0) { refresh(); continue; }
+                    size_t i = cursor;
+                    while (i > 0 && buffer[i-1] == ' ') i--;
+                    while (i > 0 && buffer[i-1] != ' ') i--;
+                    cursor = i;
+                    refresh();
+                    continue;
+                } else if (c2 == 'f') { // word right (Alt+f)
+                    size_t i = cursor;
+                    while (i < buffer.size() && buffer[i] != ' ') i++;
+                    while (i < buffer.size() && buffer[i] == ' ') i++;
+                    cursor = i;
+                    refresh();
+                    continue;
+                }
+            }
+        } else if (isprint(static_cast<unsigned char>(c))) {
+            buffer.insert(buffer.begin() + cursor, c);
+            cursor++;
+            refresh();
+        }
+    }
+}
 
 OpenRouterAPI::OpenRouterAPI() {
     // Constructor
@@ -39,89 +243,143 @@ OpenRouterAPI::~OpenRouterAPI() {
 }
 
 std::string OpenRouterAPI::getMotherboardFingerprint() {
-    std::string result = "";
-    FILE* pipe = popen("sudo dmidecode -s baseboard-serial-number", "r");
-    if (!pipe) {
-        return "";
+    // Build a fingerprint from multiple non-privileged sources. Order of preference:
+    // 1. /etc/machine-id
+    // 2. /sys/class/dmi/id/product_uuid
+    // 3. first non-loopback MAC address from /sys/class/net/*/address
+    // Concatenate available identifiers with ':' and return the result.
+
+    auto read_trimmed = [](const std::string& path) -> std::string {
+        std::ifstream f(path);
+        if (!f) return "";
+        std::string s;
+        if (!std::getline(f, s)) return "";
+        // trim
+        size_t end = s.find_last_not_of(" \n\r\t");
+        if (end == std::string::npos) return "";
+        size_t start = s.find_first_not_of(" \n\r\t");
+        if (start == std::string::npos) start = 0;
+        return s.substr(start, end - start + 1);
+    };
+
+    std::vector<std::string> parts;
+
+    // /etc/machine-id
+    std::string machine_id = read_trimmed("/etc/machine-id");
+    if (!machine_id.empty()) parts.push_back(machine_id);
+
+    // DMI product UUID (may be readable without sudo on many systems)
+    std::string product_uuid = read_trimmed("/sys/class/dmi/id/product_uuid");
+    if (!product_uuid.empty()) parts.push_back(product_uuid);
+
+    // Try first non-loopback MAC from /sys/class/net
+    DIR* d = opendir("/sys/class/net");
+    if (d) {
+        struct dirent* entry;
+        while ((entry = readdir(d)) != NULL) {
+            std::string ifname = entry->d_name;
+            if (ifname == "." || ifname == ".." || ifname == "lo") continue;
+            std::string addr_path = std::string("/sys/class/net/") + ifname + "/address";
+            std::string mac = read_trimmed(addr_path);
+            if (mac.empty()) continue;
+            // skip all-zero MACs
+            if (mac.find_first_not_of("0:") == std::string::npos) continue;
+            parts.push_back(mac);
+            break;
+        }
+        closedir(d);
     }
-    char buffer[128];
-    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-        result += buffer;
+
+    // Join parts
+    std::string fingerprint;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (i) fingerprint += ":";
+        fingerprint += parts[i];
     }
-    pclose(pipe);
-    result.erase(result.find_last_not_of(" \n\r\t")+1);
-    return result;
+
+    return fingerprint;
 }
 
+// Encryption was removed to simplify key handling. Keep no-op functions if referenced elsewhere.
 std::string OpenRouterAPI::encrypt(const std::string& data, const std::string& key) {
-    std::string result = data;
-    for (size_t i = 0; i < data.size(); ++i) {
-        result[i] = data[i] ^ key[i % key.size()];
-    }
-    return result;
+    (void)key;
+    return data;
 }
 
 std::string OpenRouterAPI::decrypt(const std::string& data, const std::string& key) {
-    return encrypt(data, key);
+    (void)key;
+    return data;
 }
 
 void OpenRouterAPI::setSystemPrompt(const std::string& prompt) {
+    // Directly set the system prompt provided by the caller. The prompt should
+    // be a plain-text instruction (no external file loading).
     conversation_history.clear();
     conversation_history.push_back({"system", prompt});
 }
 
+std::string OpenRouterAPI::buildEncryptionKey() {
+    std::string key;
+    // username
+    const char* user = std::getenv("USER");
+    if (user && std::strlen(user) > 0) key += user;
+    // hostname
+    char hostbuf[256];
+    if (gethostname(hostbuf, sizeof(hostbuf)) == 0) {
+        if (!key.empty()) key += ":";
+        key += hostbuf;
+    }
+    // machine-id / fingerprint
+    std::string fingerprint = getMotherboardFingerprint();
+    if (!fingerprint.empty()) {
+        if (!key.empty()) key += ":";
+        key += fingerprint;
+    }
+
+    return key;
+}
+
 bool OpenRouterAPI::loadApiKey() {
-    // First try to load from environment variable
+    // Try environment variable first
     const char* env_key = std::getenv("OPENROUTER_API_KEY");
     if (env_key != nullptr && std::strlen(env_key) > 0) {
         api_key = std::string(env_key);
         return true;
     }
-    
-    // Then try to load from file
+
+    // Then try a plaintext key file (~/.config/ori/key)
     const char* home_dir = std::getenv("HOME");
     if (home_dir != nullptr) {
         std::string key_file = std::string(home_dir) + "/.config/ori/key";
         std::ifstream file(key_file);
         if (file.is_open()) {
-            std::string encrypted_key;
-            std::getline(file, encrypted_key);
+            std::string stored_key;
+            std::getline(file, stored_key);
             file.close();
-            std::string fingerprint = getMotherboardFingerprint();
-            if (!fingerprint.empty()) {
-                api_key = decrypt(encrypted_key, fingerprint);
-                if (api_key.length() > 0) { 
-                    return true;
-                }
-            }
-            std::cout << YELLOW << "Failed to decrypt API key. It might be corrupted or the motherboard has been changed." << RESET << std::endl;
-        }
-    }
-    
-    // If no key is found or decryption fails, ask the user for it
-    std::cout << "Please enter your OpenRouter API key: ";
-    std::string key;
-    std::getline(std::cin, key);
-    if (key.empty()) {
-        return false;
-    }
-
-    std::string fingerprint = getMotherboardFingerprint();
-    if (!fingerprint.empty()) {
-        std::string encrypted_key = encrypt(key, fingerprint);
-        if (home_dir != nullptr) {
-            std::string key_file = std::string(home_dir) + "/.config/ori/key";
-            std::ofstream file(key_file);
-            if (file.is_open()) {
-                file << encrypted_key;
-                file.close();
-                api_key = key;
+            if (!stored_key.empty()) {
+                api_key = stored_key;
                 return true;
             }
         }
     }
 
-    return false;
+    // Prompt the user for the API key and persist it plainly with secure permissions.
+    std::cout << "Please enter your OpenRouter API key: ";
+    std::string key;
+    std::getline(std::cin, key);
+    if (key.empty()) return false;
+
+    api_key = key;
+    if (home_dir != nullptr) {
+        std::string key_file = std::string(home_dir) + "/.config/ori/key";
+        std::ofstream file(key_file);
+        if (file.is_open()) {
+            file << key;
+            file.close();
+            chmod(key_file.c_str(), 0600);
+        }
+    }
+    return true;
 }
 
 bool OpenRouterAPI::setApiKey(const std::string& key) {
@@ -160,6 +418,15 @@ std::string OpenRouterAPI::sendQuery(const std::string& prompt) {
     Json::StreamWriterBuilder builder;
     builder["indentation"] = ""; // Compact output
     std::string json_data = Json::writeString(builder, request_data);
+
+    // Debug: optionally print the outgoing JSON payload so we can verify the system prompt
+    const char* debug_env = std::getenv("ORI_DEBUG");
+    if (debug_env && std::string(debug_env) == "1") {
+        std::cerr << "[ORI_DEBUG] Outgoing JSON payload:\n" << json_data << std::endl;
+        std::cerr << "[ORI_DEBUG] conversation_history roles: ";
+        for (const auto& msg : conversation_history) std::cerr << msg.role << ",";
+        std::cerr << std::endl;
+    }
     
     // Set up curl options
     std::string response_data;
@@ -226,8 +493,20 @@ std::string OpenRouterAPI::sendQuery(const std::string& prompt) {
         return RED + "Error: Unexpected API response format - " + response_data + RESET;
     }
 #else
-    // Fallback to placeholder implementation
-    return "I received your message: '" + prompt + "'. In a full implementation, I would provide a more detailed response based on the AI model.";
+    // Fallback to a local stub that at least includes the system prompt and conversation
+    // so that the system prompt is not ignored when libcurl is unavailable.
+    std::ostringstream oss;
+    oss << "[LocalStub] Conversation so far:\n\n";
+    for (const auto& msg : conversation_history) {
+        oss << "[" << msg.role << "]\n" << msg.content << "\n\n";
+    }
+    oss << "[user]\n" << prompt << "\n\n";
+    oss << "[assistant]\n";
+    // This is a stub response — in a full build with libcurl this would be the model output.
+    oss << "(no model available in this build; install libcurl and enable CURL_FOUND to contact the API)";
+    // Add assistant's response to history so subsequent calls see context
+    conversation_history.push_back({"assistant", oss.str()});
+    return oss.str();
 #endif
 }
 
@@ -259,8 +538,6 @@ OriAssistant::~OriAssistant() {
 #endif
 }
 
-
-
 bool OriAssistant::initialize() {
     // Create config directory if it doesn't exist
     const char* home_dir = std::getenv("HOME");
@@ -281,7 +558,17 @@ bool OriAssistant::initialize() {
 
 void OriAssistant::run() {
     checkForUpdates(true);
-    std::cout << BLUE << R"( 
+    // Clear screen before showing banner
+    std::system("clear");
+    
+    // Save cursor position for future reference
+    printf("\033[s");
+    
+    // Clear screen and reset cursor to top
+    printf("\033[2J\033[H");
+    
+    // Display banner
+    std::cout << BLUE << R"(
     ███████    ███████████   █████            ███████████ █████  █████ █████
   ███▒▒▒▒▒███ ▒▒███▒▒▒▒▒███ ▒▒███            ▒█▒▒▒███▒▒▒█▒▒███  ▒▒███ ▒▒███ 
  ███     ▒▒███ ▒███    ▒███  ▒███            ▒   ▒███  ▒  ▒███   ▒███  ▒███ 
@@ -291,14 +578,16 @@ void OriAssistant::run() {
  ▒▒▒███████▒   █████   █████ █████               █████    ▒▒████████   █████
    ▒▒▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒               ▒▒▒▒▒      ▒▒▒▒▒▒▒▒   ▒▒▒▒▒
 )" << RESET << std::endl;
-    std::cout << BOLD << BLUE << "ORI Terminal Assistant v0.4" << RESET << "\n";
-    std::cout << "Type '/help' for available commands or '/quit' to exit.\n\n";
+    std::cout << BOLD << BLUE << "ORI Terminal Assistant v0.5" << RESET << "\n";
+    // Single newline after instructions to avoid empty-space gap
+    std::cout << "Type '/help' for available commands or '/quit' to exit.\n";
     
-    std::string input;
+    // Save cursor position after banner (for potential future use)
+    printf("\033[s");
+    
     while (true) {
-        std::cout << BOLD << GREEN << "> " << RESET;
-        std::getline(std::cin, input);
-
+        std::string input = readInput();
+        
         if (std::cin.fail() || std::cin.eof()) {
             break;
         }
@@ -319,37 +608,202 @@ void OriAssistant::run() {
     }
 }
 
+void OriAssistant::handleResponse(const std::string& response, bool auto_confirm) {
+    // Move to a new line to ensure clean output
+    std::cout << "\n";
+
+    size_t current_pos = 0;
+    while (true) {
+        // Find next tag: either [exec] or [edit]
+        size_t exec_start = response.find("[exec]", current_pos);
+        size_t exec_end = (exec_start != std::string::npos) ? response.find("[/exec]", exec_start) : std::string::npos;
+        size_t edit_start = response.find("[edit]", current_pos);
+        size_t edit_end = (edit_start != std::string::npos) ? response.find("[/edit]", edit_start) : std::string::npos;
+        size_t writefile_start = response.find("[writefile(", current_pos);
+        size_t writefile_end = (writefile_start != std::string::npos) ? response.find("[/writefile]", writefile_start) : std::string::npos;
+
+        // Determine which tag comes next
+        size_t next_pos = std::string::npos;
+        enum TagType { NONE, EXEC, EDIT, WRITEFILE } next_tag = NONE;
+        if (exec_start != std::string::npos && (edit_start == std::string::npos || exec_start < edit_start) && (writefile_start == std::string::npos || exec_start < writefile_start)) {
+            next_pos = exec_start; next_tag = EXEC;
+        } else if (edit_start != std::string::npos && (writefile_start == std::string::npos || edit_start < writefile_start)) {
+            next_pos = edit_start; next_tag = EDIT;
+        } else if (writefile_start != std::string::npos) {
+            next_pos = writefile_start; next_tag = WRITEFILE;
+        }
+
+
+        if (next_tag == NONE) {
+            // Print remaining
+            if (current_pos < response.length()) {
+                std::string remaining = response.substr(current_pos);
+                std::istringstream iss(remaining);
+                std::string line;
+                while (std::getline(iss, line)) {
+                    if (!line.empty()) {
+                        line.erase(0, line.find_first_not_of(" \t"));
+                        std::cout << line << "\n";
+                    }
+                }
+                std::cout.flush();
+            }
+            break;
+        }
+
+        // Print any text before the tag
+        if (next_pos > current_pos) {
+            std::cout << response.substr(current_pos, next_pos - current_pos);
+        }
+
+        if (next_tag == EXEC) {
+            // Handle exec block
+            if (exec_end == std::string::npos) break; // malformed
+            size_t cmd_start = exec_start + strlen("[exec]");
+            std::string command = response.substr(cmd_start, exec_end - cmd_start);
+            handleCommandExecution(command, auto_confirm);
+            current_pos = exec_end + strlen("[/exec]");
+            continue;
+        } else if (next_tag == EDIT) {
+            // Handle edit block using strict JSON parsing (JsonCpp)
+            if (edit_end == std::string::npos) break; // malformed
+            size_t json_start = edit_start + strlen("[edit]");
+            std::string payload = response.substr(json_start, edit_end - json_start);
+            // Trim whitespace
+            auto trim = [](std::string &s) {
+                size_t a = s.find_first_not_of(" \t\n\r");
+                if (a == std::string::npos) { s.clear(); return; }
+                size_t b = s.find_last_not_of(" \t\n\r");
+                s = s.substr(a, b - a + 1);
+            };
+            trim(payload);
+
+            Json::CharReaderBuilder readerBuilder;
+            std::string errs;
+            Json::Value root;
+            std::unique_ptr<Json::CharReader> reader(readerBuilder.newCharReader());
+            bool parsed = false;
+            if (!payload.empty()) {
+                parsed = reader->parse(payload.c_str(), payload.c_str() + payload.size(), &root, &errs);
+            }
+
+            if (!parsed) {
+                std::cout << YELLOW << "[edit] payload is not valid JSON. Assistant must return strictly escaped JSON inside [edit] tags." << RESET << std::endl;
+                if (!errs.empty()) std::cerr << "[ORI_DEBUG] json parse errors: " << errs << std::endl;
+                std::cout << payload << std::endl;
+                current_pos = edit_end + strlen("[/edit]");
+                continue;
+            }
+
+            std::string operation = root.get("operation", "").asString();
+            if (operation.empty()) {
+                std::cout << YELLOW << "[edit] block missing 'operation' field" << RESET << std::endl;
+                current_pos = edit_end + strlen("[/edit]");
+                continue;
+            }
+
+            if (operation == "compare") {
+                if (root.isMember("files") && root["files"].isArray() && root["files"].size() >= 2) {
+                    std::string f1 = root["files"][0].asString();
+                    std::string f2 = root["files"][1].asString();
+                    OriEdit::showDiff(f1, f2);
+                } else {
+                    std::cout << YELLOW << "[edit] compare requires a 'files' array with at least two file paths" << RESET << std::endl;
+                }
+            } else if (operation == "replace" || operation == "modify" || operation == "create") {
+                std::string filename = root.get("file", "").asString();
+                std::string newcontent;
+                if (root.isMember("content")) {
+                    if (root["content"].isObject() && root["content"].isMember("new")) {
+                        newcontent = root["content"]["new"].asString();
+                    } else if (root["content"].isString()) {
+                        newcontent = root["content"].asString();
+                    }
+                } else if (root.isMember("new")) {
+                    newcontent = root["new"].asString();
+                }
+
+                if (filename.empty()) {
+                    std::cout << YELLOW << "[edit] missing 'file' field" << RESET << std::endl;
+                } else {
+                    OriEdit::EditOperation op;
+                    op.type = operation;
+                    op.filename = filename;
+                    op.newContent = newcontent;
+                    op.preview = false;
+                    op.diff = false;
+                    // For create operations, don't attempt to backup the non-existent file
+                    op.backup = (operation != "create");
+                    op.interactive = false;
+                    op.safe = true;
+
+                    if (op.newContent.empty()) {
+                        std::cout << YELLOW << "[edit] no new content found in JSON payload for file " << filename << RESET << std::endl;
+                    } else {
+                        OriEdit::applyChanges(op);
+                    }
+                }
+            } else if (operation == "rename") {
+                std::string filename = root.get("file", "").asString();
+                std::string newname = root.get("newname", "").asString();
+                if (filename.empty() || newname.empty()) {
+                    std::cout << YELLOW << "[edit] rename requires 'file' and 'newname' fields" << RESET << std::endl;
+                } else {
+                    if (std::rename(filename.c_str(), newname.c_str()) == 0) {
+                        std::cout << GREEN << "Renamed " << filename << " -> " << newname << RESET << std::endl;
+                    } else {
+                        std::cout << RED << "Failed to rename " << filename << RESET << std::endl;
+                    }
+                }
+            } else {
+                std::cout << YELLOW << "[edit] unsupported operation: " << operation << RESET << std::endl;
+            }
+
+            current_pos = edit_end + strlen("[/edit]");
+            continue;
+        #include <filesystem>
+
+// ... (rest of the file)
+
+        } else if (next_tag == WRITEFILE) {
+            // Handle writefile block
+            if (writefile_end == std::string::npos) break; // malformed
+            size_t fn_start = writefile_start + strlen("[writefile(");
+            size_t fn_end = response.find(")]", fn_start);
+            if (fn_end == std::string::npos) break; // malformed
+            std::string filename = response.substr(fn_start, fn_end - fn_start);
+            size_t content_start = fn_end + strlen(")]");
+            std::string content = response.substr(content_start, writefile_end - content_start);
+
+            // Create directories if they don't exist
+            size_t last_slash = filename.find_last_of("/");
+            if (last_slash != std::string::npos) {
+                std::string dir = filename.substr(0, last_slash);
+                std::filesystem::create_directories(dir);
+            }
+
+            std::ofstream file(filename);
+            if (file.is_open()) {
+                file << content;
+                file.close();
+                std::cout << GREEN << "File created: " << filename << RESET << std::endl;
+            } else {
+                std::cout << RED << "Failed to create file: " << filename << RESET << std::endl;
+            }
+            current_pos = writefile_end + strlen("[/writefile]");
+            continue;
+        }
+    }
+}
+
 void OriAssistant::processSingleRequest(const std::string& prompt, bool auto_confirm) {
     if (!api) {
         std::cout << RED << "Error: API not initialized" << RESET << std::endl;
         return;
     }
-    std::string response = api->sendQuery(prompt);
-
-    size_t current_pos = 0;
-    while (true) {
-        size_t start_pos = response.find("[exec]", current_pos);
-        size_t end_pos = response.find("[/exec]", start_pos);
-
-        if (start_pos != std::string::npos && end_pos != std::string::npos) {
-            // Print any text before the command
-            if (start_pos > current_pos) {
-                std::cout << response.substr(current_pos, start_pos - current_pos);
-            }
-
-            start_pos += 6; // Move past "[exec]"
-            std::string command = response.substr(start_pos, end_pos - start_pos);
-            handleCommandExecution(command, auto_confirm);
-
-            current_pos = end_pos + 7; // Move past "[/exec]"
-        } else {
-            // Print any remaining text after the last command
-            if (current_pos < response.length()) {
-                std::cout << response.substr(current_pos) << "\n\n";
-            }
-            break;
-        }
-    }
+    
+    // Get response and handle it
+    handleResponse(api->sendQuery(prompt), auto_confirm);
 }
 
 void OriAssistant::handleCommandExecution(const std::string& command, bool auto_confirm) {
@@ -357,6 +811,11 @@ void OriAssistant::handleCommandExecution(const std::string& command, bool auto_
     if (auto_confirm) {
         confirmed = true;
     } else {
+        // Warn if sudo/su present but still ask for interactive confirmation
+        if (command.find("sudo") != std::string::npos || command.find(" su ") != std::string::npos) {
+            std::cout << YELLOW << "Warning: this command requests elevated privileges (contains 'sudo' or 'su'). It may prompt for a password when run." << RESET << std::endl;
+        }
+
         std::cout << YELLOW << "Execute the following command? (y/n): " << RESET << BOLD << CYAN << "<< " << command << " >> " << RESET;
         std::string confirmation;
         std::getline(std::cin, confirmation);
@@ -383,7 +842,6 @@ void OriAssistant::handleCommandExecution(const std::string& command, bool auto_
         // Formulate a new prompt and send it back to the AI
         std::string feedback_prompt = "The command \"" + command + "\" produced the following output:\n---\n" + result + "\n---\nPlease summarize this output or answer the original question based on it.";
         processSingleRequest(feedback_prompt, auto_confirm);
-
     } else {
         std::cout << YELLOW << "Command execution cancelled." << RESET << "\n\n";
         // Inform the AI that the command was cancelled.
@@ -410,7 +868,7 @@ void OriAssistant::checkForUpdates(bool silent) {
 
         if (res == CURLE_OK) {
             std::ifstream version_file(".version");
-            std::string current_version = "0.4";
+            std::string current_version = "0.5";
             if (version_file.is_open()) {
                 std::getline(version_file, current_version);
                 version_file.close();

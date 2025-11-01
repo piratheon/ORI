@@ -29,7 +29,7 @@ Ori Assistant is a Linux-based TUI (Text User Interface) AI assistant that integ
 
 ## Current Implementation Status
 
-This project is currently at version 0.4.
+This project is currently at version 0.5.
 
 ### Core Components
 

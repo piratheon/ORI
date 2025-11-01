@@ -1,0 +1,25 @@
+# Maintainer: Piratheon <piratheon@example.com>
+pkgname=ori
+pkgver=0.5
+pkgrel=1
+pkgdesc="ORI Terminal Assistant - terminal AI assistant"
+arch=(x86_64)
+url="https://github.com/piratheon/ORI"
+license=(MIT)
+depends=(curl jsoncpp)
+makedepends=(cmake gcc make pkg-config)
+source=("https://github.com/piratheon/ORI/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+  mkdir -p build
+  cd build
+  cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+  make
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver/build"
+  make DESTDIR="$pkgdir" install
+}
