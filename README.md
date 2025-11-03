@@ -219,9 +219,8 @@ ori "hello"
 ## Future Enhancements (maybe on version 1.0?)
 
 ### Core Features
-- Full OpenRouter API integration with real AI responses
 - Google Gemini 2.0 integration for complex queries 
-- Advanced command-line flag support
+- More advanced command-line flag support
 - Configuration file support
 
 ### Plugin System
