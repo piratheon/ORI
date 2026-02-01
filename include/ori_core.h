@@ -5,6 +5,9 @@
 #include <vector>
 #include <memory>
 #include <atomic>
+#include <map>
+#include "ori_provider.h"
+#include <json/json.h> // Include for Json::Value
 
 #ifdef CURL_FOUND
 #include <curl/curl.h>
@@ -19,7 +22,8 @@ struct Config {
     int port;
     bool no_banner;
     bool no_clear;
-    std::string model;
+    std::string active_api_config;
+    std::string auto_execute_commands_mode; // Added for /autoexec command
     bool debug; // Added debug flag
 
     Config();
@@ -28,9 +32,19 @@ struct Config {
 extern bool g_debug_enabled_in_gui_mode; // Global flag for GUI debug logging
 extern bool g_is_gui_mode; // Global flag for GUI mode
 
+extern std::atomic<bool> keep_running;
+extern void run_spinner(const std::string& message);
+extern void sigint_handler(int signum);
+
 // ANSI Color Codes (declared extern for main.cpp usage)
 extern const std::string RESET;
+extern const std::string BOLD;
+extern const std::string RED;
+extern const std::string GREEN;
 extern const std::string YELLOW;
+extern const std::string BLUE;
+extern const std::string MAGENTA;
+extern const std::string CYAN;
 
 class ConfigManager {
 private:
@@ -48,32 +62,14 @@ public:
     std::string getAllConfig();
 };
 
-class OpenRouterAPI {
-private:
-    std::string api_key;
-    std::string model;
-    std::vector<ChatMessage> conversation_history;
-    std::string getMotherboardFingerprint();
-    bool m_isGui = false;
-    std::string colorize(const std::string& color, const std::string& text);
-    
-public:
-    OpenRouterAPI();
-    ~OpenRouterAPI();
-    
-    bool loadApiKey();
-    bool setApiKey(const std::string& key);
-    std::string getApiKey() const;
-    void setModel(const std::string& model_name);
-    void setIsGui(bool isGui);
-    void setSystemPrompt(const std::string& prompt);
-    
-    std::string sendQuery(const std::string& prompt);
-};
-
 struct CommandLogEntry {
     std::string command;
     std::string output;
+};
+
+struct ProviderInfo {
+    std::unique_ptr<APIProvider> provider;
+    Json::Value details; // Stores the full JSON entry from keys.json
 };
 
 class OriAssistant {
@@ -86,9 +82,13 @@ private:
     void displayCommandLog();
     void showBanner();
     std::string pre_prompt_context;
+    
+    std::map<std::string, ProviderInfo> providers_info;
+    APIProvider* active_provider = nullptr;
+    std::vector<ChatMessage> conversation_history;
+
 
 public:
-    std::unique_ptr<OpenRouterAPI> api;
     Config config;
     ConfigManager configManager;
     
@@ -102,13 +102,13 @@ public:
     bool initialize();
     void run();
     void showHelp();
-    // Read a line (possibly multiline) from the user with basic editing support.
-    // Supports Alt+Enter to insert a newline without submitting.
     std::string readInput();
     void processSingleRequest(const std::string& prompt, bool auto_confirm);
     void handleCommandExecution(const std::string& command, bool auto_confirm, bool send_to_ai = true);
     void handleResponse(const std::string& response, bool auto_confirm);
     void checkForUpdates(bool silent);
+    void setSystemPrompt(const std::string& prompt);
+    std::string sendQuery(const std::string& prompt);
 };
 
 #endif // ORI_CORE_H

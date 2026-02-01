@@ -18,7 +18,7 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 
-static std::atomic<bool> keep_running{true};
+std::atomic<bool> keep_running{true};
 bool g_is_gui_mode = false;
 bool g_debug_enabled_in_gui_mode = false; // New global flag for GUI debug logging
 std::atomic<bool> OriAssistant::interrupted_flag{false};
@@ -296,314 +296,40 @@ std::string OriAssistant::readInput() {
     }
 }
 
-OpenRouterAPI::OpenRouterAPI() {
-    // Constructor
-    model = "google/gemini-2.0-flash-exp:free";
-}
 
-OpenRouterAPI::~OpenRouterAPI() {
-    // Destructor
-}
 
-void OpenRouterAPI::setModel(const std::string& model_name) {
-    model = model_name;
-}
 
-std::string OpenRouterAPI::getMotherboardFingerprint() {
-    // Build a fingerprint from multiple non-privileged sources. Order of preference:
-    // 1. /etc/machine-id
-    // 2. /sys/class/dmi/id/product_uuid
-    // 3. first non-loopback MAC address from /sys/class/net/*/address
-    // Concatenate available identifiers with ':' and return the result.
 
-    auto read_trimmed = [](const std::string& path) -> std::string {
-        std::ifstream f(path);
-        if (!f) return "";
-        std::string s;
-        if (!std::getline(f, s)) return "";
-        // trim
-        size_t end = s.find_last_not_of(" \n\r\t");
-        if (end == std::string::npos) return "";
-        size_t start = s.find_first_not_of(" \n\r\t");
-        if (start == std::string::npos) start = 0;
-        return s.substr(start, end - start + 1);
-    };
-
-    std::vector<std::string> parts;
-
-    // /etc/machine-id
-    std::string machine_id = read_trimmed("/etc/machine-id");
-    if (!machine_id.empty()) parts.push_back(machine_id);
-
-    // DMI product UUID (may be readable without sudo on many systems)
-    std::string product_uuid = read_trimmed("/sys/class/dmi/id/product_uuid");
-    if (!product_uuid.empty()) parts.push_back(product_uuid);
-
-    // Try first non-loopback MAC from /sys/class/net
-    DIR* d = opendir("/sys/class/net");
-    if (d) {
-        struct dirent* entry;
-        while ((entry = readdir(d)) != NULL) {
-            std::string ifname = entry->d_name;
-            if (ifname == "." || ifname == ".." || ifname == "lo") continue;
-            std::string addr_path = std::string("/sys/class/net/") + ifname + "/address";
-            std::string mac = read_trimmed(addr_path);
-            if (mac.empty()) continue;
-            // skip all-zero MACs
-            if (mac.find_first_not_of("0:") == std::string::npos) continue;
-            parts.push_back(mac);
-            break;
-        }
-        closedir(d);
-    }
-
-    // Join parts
-    std::string fingerprint;
-    for (size_t i = 0; i < parts.size(); ++i) {
-        if (i) fingerprint += ":";
-        fingerprint += parts[i];
-    }
-
-    return fingerprint;
-}
-
-void OpenRouterAPI::setSystemPrompt(const std::string& prompt) {
-    // Directly set the system prompt provided by the caller. The prompt should
-    // be a plain-text instruction (no external file loading).
-    conversation_history.clear();
-    conversation_history.push_back({"system", prompt});
-}
-
-bool OpenRouterAPI::loadApiKey() {
-    // Try environment variable first
-    const char* env_key = std::getenv("OPENROUTER_API_KEY");
-    if (env_key != nullptr && std::strlen(env_key) > 0) {
-        api_key = std::string(env_key);
-        return true;
-    }
-
-    // Then try a plaintext key file (~/.config/ori/key)
-    const char* home_dir = std::getenv("HOME");
-    if (home_dir != nullptr) {
-        std::string key_file = std::string(home_dir) + "/.config/ori/key";
-        std::ifstream file(key_file);
-        if (file.is_open()) {
-            std::string stored_key;
-            std::getline(file, stored_key);
-            file.close();
-            if (!stored_key.empty()) {
-                api_key = stored_key;
-                return true;
-            }
-        }
-    }
-
-    // Prompt the user for the API key and persist it plainly with secure permissions.
-    std::cout << "Please enter your OpenRouter API key: ";
-    std::string key;
-    std::getline(std::cin, key);
-    if (key.empty()) return false;
-
-    api_key = key;
-    if (home_dir != nullptr) {
-        std::string key_file = std::string(home_dir) + "/.config/ori/key";
-        std::ofstream file(key_file);
-        if (file.is_open()) {
-            file << key;
-            file.close();
-            chmod(key_file.c_str(), 0600);
-        }
-    }
-    return true;
-}
-
-bool OpenRouterAPI::setApiKey(const std::string& key) {
-    api_key = key;
-    return true;
-}
-
-std::string OpenRouterAPI::getApiKey() const {
-    return api_key;
-}
-
-void OpenRouterAPI::setIsGui(bool isGui) {
-    m_isGui = isGui;
-    g_is_gui_mode = isGui;
-}
-
-std::string OpenRouterAPI::colorize(const std::string& color, const std::string& text) {
-    if (m_isGui) {
+std::string colorize(const std::string& color, const std::string& text) {
+    if (g_is_gui_mode) {
         return text;
     }
     return color + text + RESET;
 }
 
-std::string OpenRouterAPI::sendQuery(const std::string& prompt) {
-#ifdef CURL_FOUND
-    // Add user's message to history
-    conversation_history.push_back({"user", prompt});
-
-    // Initialize curl
-    CURL* curl = curl_easy_init();
-    if (!curl) {
-        return colorize(RED, "Error: Failed to initialize curl");
-    }
-    
-    // Prepare the request data
-    Json::Value request_data;
-    request_data["model"] = model;
-    
-    Json::Value messages(Json::arrayValue);
-    for (const auto& msg : conversation_history) {
-        Json::Value message;
-        message["role"] = msg.role;
-        message["content"] = msg.content;
-        messages.append(message);
-    }
-    request_data["messages"] = messages;
-    
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = ""; // Compact output
-    std::string json_data = Json::writeString(builder, request_data);
-
-    // Debug: optionally print the outgoing JSON payload so we can verify the system prompt
-    const char* debug_env = std::getenv("ORI_DEBUG");
-    if (debug_env && std::string(debug_env) == "1") {
-        std::cerr << "[ORI_DEBUG] Outgoing JSON payload:\n" << json_data << std::endl;
-        std::cerr << "[ORI_DEBUG] conversation_history roles: ";
-        for (const auto& msg : conversation_history) std::cerr << msg.role << ",";
-        std::cerr << std::endl;
-    }
-    
-    // Set up curl options
-    std::string response_data;
-    struct curl_slist* headers = NULL;
-    
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    std::string auth_header = "Authorization: Bearer " + api_key;
-    headers = curl_slist_append(headers, auth_header.c_str());
-    
-    curl_easy_setopt(curl, CURLOPT_URL, "https://openrouter.ai/api/v1/chat/completions");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_data.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_data);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "OriAssistant/1.0");
-    
-    // Perform the request with retry logic
-    const int max_retries = 5;
-    const int retry_delay_seconds = 2;
-    CURLcode res = CURLE_OK;
-    long http_code = 0;
-
-    for (int attempt = 0; attempt < max_retries; ++attempt) {
-        std::string spinner_message = "loading...";
-        if (attempt > 0) {
-            std::string reason;
-            if (res != CURLE_OK) {
-                reason = curl_easy_strerror(res);
-            } else if (http_code == 429) {
-                reason = "rate limited";
-            } else {
-                reason = "connection failed";
-            }
-            spinner_message = reason + ", retrying...";
-            std::this_thread::sleep_for(std::chrono::seconds(retry_delay_seconds));
-        }
-
-        response_data.clear();
-        keep_running = true;
-        std::thread spinner_thread(run_spinner, spinner_message);
-        res = curl_easy_perform(curl);
-        keep_running = false;
-        spinner_thread.join();
-
-        if (res != CURLE_OK) {
-            if (res == CURLE_COULDNT_CONNECT || res == CURLE_COULDNT_RESOLVE_HOST || res == CURLE_OPERATION_TIMEDOUT) {
-                if (attempt < max_retries - 1) continue; // Retry on specific connection errors
-            }
-            break; // Don't retry on other curl errors or on last attempt
-        }
-
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-
-        if (http_code >= 200 && http_code < 300) {
-            break; // Success
-        }
-
-        if (http_code == 429) { // Rate limit
-            if (attempt < max_retries - 1) continue; // Retry
-        }
-
-        // For any other http_code, break and fail.
-        break;
-    }
-    
-    // Clean up
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-    
-    if (res != CURLE_OK) {
-        return colorize(RED, "Error: Failed to connect to OpenRouter API - " + std::string(curl_easy_strerror(res)));
-    }
-    
-    // Parse the response
-    Json::Value response_json;
-    Json::Reader reader;
-    if (!reader.parse(response_data, response_json)) {
-        return colorize(RED, "Error: Failed to parse API response - " + response_data);
-    }
-    
-    // Check for a structured error response
-    if (response_json.isMember("error")) {
-        std::string error_message = "API Error";
-        const Json::Value& error_obj = response_json["error"];
-
-        if (error_obj.isMember("code") && error_obj["code"].isNumeric()) {
-            error_message += " (Code: " + error_obj["code"].asString() + ")";
-        }
-        if (error_obj.isMember("message") && error_obj["message"].isString()) {
-            error_message += ": " + error_obj["message"].asString();
-        }
-        if (error_obj.isMember("metadata") && error_obj["metadata"].isObject() &&
-            error_obj["metadata"].isMember("raw") && error_obj["metadata"]["raw"].isString()) {
-            error_message += " (Details: " + error_obj["metadata"]["raw"].asString() + ")";
-        }
-        return colorize(RED, error_message);
-    }
-    
-    // Extract the response text
-    if (response_json.isMember("choices") && response_json["choices"].isArray() && 
-        response_json["choices"].size() > 0 && 
-        response_json["choices"][0].isMember("message") && 
-        response_json["choices"][0]["message"].isMember("content")) {
-        
-        std::string assistant_response = response_json["choices"][0]["message"]["content"].asString();
-        // Add assistant's response to history
-        conversation_history.push_back({"assistant", assistant_response});
-        return assistant_response;
-    } else {
-        return colorize(RED, "Error: Unexpected API response format - " + response_data);
-    }
-#else
-    // Fallback to a local stub that at least includes the system prompt and conversation
-    // so that the system prompt is not ignored when libcurl is unavailable.
-    std::ostringstream oss;
-    oss << "[LocalStub] Conversation so far:\n\n";
-    for (const auto& msg : conversation_history) {
-        oss << "[" << msg.role << "]\n" << msg.content << "\n\n";
-    }
-    oss << "[user]\n" << prompt << "\n\n";
-    oss << "[assistant]\n";
-    // This is a stub response — in a full build with libcurl this would be the model output.
-    oss << "(no model available in this build; install libcurl and enable CURL_FOUND to contact the API)";
-    // Add assistant's response to history so subsequent calls see context
-    conversation_history.push_back({"assistant", oss.str()});
-    return oss.str();
-#endif
+void OriAssistant::setSystemPrompt(const std::string& prompt) {
+    conversation_history.push_back({"system", prompt});
 }
 
+std::string OriAssistant::sendQuery(const std::string& prompt) {
+    if (!active_provider) {
+        return colorize(RED, "Error: No active API provider is configured.");
+    }
+    
+    conversation_history.push_back({"user", prompt});
+    
+    // Create a temporary copy of the conversation history for the provider
+    std::vector<std::pair<std::string, std::string>> provider_history;
+    for(const auto& msg : conversation_history) {
+        provider_history.push_back({msg.role, msg.content});
+    }
 
+    std::string response = active_provider->sendQuery(prompt, provider_history);
+    
+    conversation_history.push_back({"assistant", response});
+    
+    return response;
+}
 
 #ifdef CURL_FOUND
 static bool curl_initialized = false;
@@ -616,7 +342,6 @@ OriAssistant::OriAssistant() {
         curl_initialized = true;
     }
 #endif
-    api = std::make_unique<OpenRouterAPI>();
 }
 
 OriAssistant::~OriAssistant() {
@@ -630,26 +355,85 @@ bool OriAssistant::initialize() {
     std::signal(SIGINT, sigint_handler);
     // Create config directory if it doesn't exist
     const char* home_dir = std::getenv("HOME");
+    std::string config_dir_path;
     if (home_dir != nullptr) {
-        std::string config_dir = std::string(home_dir) + "/.config/ori";
+        config_dir_path = std::string(home_dir) + "/.config/ori";
         struct stat st;
-        if (stat(config_dir.c_str(), &st) == -1) {
-            mkdir(config_dir.c_str(), 0755);
+        if (stat(config_dir_path.c_str(), &st) == -1) {
+            mkdir(config_dir_path.c_str(), 0755);
         }
     }
     
     configManager.loadConfig(config);
-    api->setModel(config.model);
 
-    if (!api->loadApiKey()) {
-        std::cerr << RED << "Error: Failed to load API key. Please set OPENROUTER_API_KEY or create Openrouter_api_key.txt." << RESET << std::endl;
+    // Load providers from keys.json
+    std::string keys_path = config_dir_path + "/keys.json";
+    std::ifstream keys_file(keys_path);
+    if (!keys_file.is_open()) {
+        std::cerr << RED << "Error: Could not open " << keys_path << ". Please run the initial setup." << RESET << std::endl;
         return false;
     }
+
+    Json::Value keys_json;
+    keys_file >> keys_json;
+
+    for (const auto& key_entry : keys_json) {
+        std::string id = key_entry.get("id", "").asString();
+        std::string provider_name = key_entry.get("provider", "").asString();
+        std::string api_key = key_entry.get("api_key", "").asString();
+        std::string model = key_entry.get("model", "").asString();
+
+        if (id.empty() || provider_name.empty() || api_key.empty()) {
+            continue;
+        }
+
+        std::unique_ptr<APIProvider> provider;
+        if (provider_name == "openrouter") {
+            provider = std::make_unique<OpenRouterProvider>();
+        } else if (provider_name == "google") {
+            provider = std::make_unique<GoogleProvider>();
+        } else if (provider_name == "huggingface") {
+            provider = std::make_unique<HuggingFaceProvider>();
+        } else {
+            continue;
+        }
+
+        provider->setApiKey(api_key);
+        provider->setModel(model);
+        
+        ProviderInfo p_info;
+        p_info.provider = std::move(provider);
+        p_info.details = key_entry; // Store the full JSON entry
+        providers_info[id] = std::move(p_info);
+    }
+
+    if (providers_info.empty()) {
+        std::cerr << RED << "Error: No valid API providers found in " << keys_path << "." << RESET << std::endl;
+        return false;
+    }
+
+    // Set active provider
+    auto it = providers_info.find(config.active_api_config);
+    if (it != providers_info.end()) {
+        active_provider = it->second.provider.get();
+    } else {
+        // Fallback to the first available provider
+        active_provider = providers_info.begin()->second.provider.get();
+        config.active_api_config = providers_info.begin()->first;
+        configManager.saveConfig(config);
+    }
+    
     return true;
 }
 
 void OriAssistant::run() {
+    if (config.debug) {
+        std::cerr << "Debug: Before checkForUpdates" << std::endl;
+    }
     checkForUpdates(true);
+    if (config.debug) {
+        std::cerr << "Debug: After checkForUpdates" << std::endl;
+    }
     if (!config.no_clear) {
         // Clear screen before showing banner
         std::system("clear");
@@ -690,8 +474,48 @@ void OriAssistant::run() {
                 }
             } else if (input.rfind("/exec ", 0) == 0) {
                 std::string command = input.substr(6);
-                handleCommandExecution(command, true, false);
-            } else {
+                handleCommandExecution(command, false, false); // Manual confirm for /exec command
+            } else if (input.rfind("/autoexec ", 0) == 0) {
+                std::string mode = input.substr(10);
+                if (mode == "ask" || mode == "yes" || mode == "no") {
+                    config.auto_execute_commands_mode = mode;
+                    configManager.saveConfig(config);
+                    std::cout << GREEN << "Auto-execute mode set to: " << mode << RESET << std::endl;
+                } else {
+                    std::cout << RED << "Invalid autoexec mode. Use 'ask', 'yes', or 'no'." << RESET << std::endl;
+                }
+            } else if (input.rfind("/model ", 0) == 0) {
+                std::string api_config_id = input.substr(7);
+                auto it = providers_info.find(api_config_id);
+                if (it != providers_info.end()) {
+                    active_provider = it->second.provider.get();
+                    config.active_api_config = api_config_id;
+                    configManager.saveConfig(config);
+                    std::cout << GREEN << "Active model set to: " << api_config_id << RESET << std::endl;
+                } else {
+                    std::cout << RED << "Model '" << api_config_id << "' not found. Available models:" << RESET << std::endl;
+                    for (const auto& pair : providers_info) {
+                        std::cout << "  - " << pair.first << (pair.second.details.isMember("model") ? " (" + pair.second.details["model"].asString() + ")" : "") << std::endl;
+                    }
+                }
+            } else if (input == "/thinking") {
+                // Check if a 'thinking' role model is configured
+                bool found_thinking_model = false;
+                for (const auto& pair : providers_info) {
+                    if (pair.second.details.isMember("role") && pair.second.details["role"].asString() == "thinking") {
+                        active_provider = pair.second.provider.get();
+                        config.active_api_config = pair.first;
+                        configManager.saveConfig(config);
+                        std::cout << YELLOW << "Thinking mode activated using model: " << pair.first << RESET << std::endl;
+                        found_thinking_model = true;
+                        break;
+                    }
+                }
+                if (!found_thinking_model) {
+                    std::cout << YELLOW << "No 'thinking' role model configured in keys.json." << RESET << std::endl;
+                }
+            }
+            else {
                 std::cout << RED << "Unknown command: " << input << RESET << std::endl;
             }
         } else if (!input.empty()) {
@@ -713,7 +537,7 @@ void OriAssistant::showBanner() {
  ▒▒▒███████▒   █████   █████ █████               █████    ▒▒████████   █████
    ▒▒▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒               ▒▒▒▒▒      ▒▒▒▒▒▒▒▒   ▒▒▒▒▒
 )" << RESET << std::endl;
-        std::cout << BOLD << BLUE << "ORI Terminal Assistant v1.1.4" << RESET << "\n";
+        std::cout << BOLD << BLUE << "ORI Terminal Assistant v1.1.5" << RESET << "\n";
         // Single newline after instructions to avoid empty-space gap
         std::cout << "Type '/help' for available commands or '/quit' to exit.\n";
     }
@@ -921,11 +745,6 @@ void OriAssistant::handleResponse(const std::string& response, bool auto_confirm
 }
 
 void OriAssistant::processSingleRequest(const std::string& prompt, bool auto_confirm) {
-    if (!api) {
-        std::cout << RED << "Error: API not initialized" << RESET << std::endl;
-        return;
-    }
-    
     std::string full_prompt = prompt;
     if (!pre_prompt_context.empty()) {
         full_prompt = pre_prompt_context + "\n" + prompt;
@@ -933,7 +752,7 @@ void OriAssistant::processSingleRequest(const std::string& prompt, bool auto_con
     }
     
     // Get response and handle it
-    handleResponse(api->sendQuery(full_prompt), auto_confirm);
+    handleResponse(sendQuery(full_prompt), auto_confirm);
 }
 
 pid_t popen2(const char *command, int *read_fd) {
@@ -970,24 +789,32 @@ void OriAssistant::handleCommandExecution(const std::string& command, bool auto_
     if (auto_confirm) {
         confirmed = true;
     } else {
-        // Warn if sudo/su present but still ask for interactive confirmation
-        if (command.find("sudo") != std::string::npos || command.find(" su ") != std::string::npos) {
-            std::cout << YELLOW << "Warning: this command requests elevated privileges (contains 'sudo' or 'su'). It may prompt for a password when run." << RESET << std::endl;
-        }
-
-        std::cout << YELLOW << "Execute the following command? (y/n): " << RESET << BOLD << CYAN << "<< " << command << " >> " << RESET;
-        std::string confirmation;
-        interrupted_flag = false;
-        std::getline(std::cin, confirmation);
-        if (std::cin.fail() || interrupted_flag) {
-            std::cin.clear();
-            interrupted_flag = false;
-            confirmation = "n";
-            std::cout << std::endl;
-        }
-
-        if (confirmation == "y" || confirmation == "Y") {
+        if (config.auto_execute_commands_mode == "yes") {
             confirmed = true;
+            std::cout << YELLOW << "Auto-confirming command execution: " << BOLD << CYAN << "<< " << command << " >> " << RESET << "\n";
+        } else if (config.auto_execute_commands_mode == "no") {
+            confirmed = false;
+            std::cout << YELLOW << "Auto-declining command execution: " << BOLD << CYAN << "<< " << command << " >> " << RESET << "\n";
+        } else { // "ask" or any other value
+            // Warn if sudo/su present but still ask for interactive confirmation
+            if (command.find("sudo") != std::string::npos || command.find(" su ") != std::string::npos) {
+                std::cout << YELLOW << "Warning: this command requests elevated privileges (contains 'sudo' or 'su'). It may prompt for a password when run." << RESET << std::endl;
+            }
+
+            std::cout << YELLOW << "Execute the following command? (y/n): " << RESET << BOLD << CYAN << "<< " << command << " >> " << RESET;
+            std::string confirmation;
+            interrupted_flag = false;
+            std::getline(std::cin, confirmation);
+            if (std::cin.fail() || interrupted_flag) {
+                std::cin.clear();
+                interrupted_flag = false;
+                confirmation = "n";
+                std::cout << std::endl;
+            }
+
+            if (confirmation == "y" || confirmation == "Y") {
+                confirmed = true;
+            }
         }
     }
 
@@ -1015,7 +842,7 @@ void OriAssistant::handleCommandExecution(const std::string& command, bool auto_
                     kill(-pid, SIGKILL);
                     waitpid(pid, NULL, 0);
                     result += "\n[Command cancelled by user]";
-                    api->sendQuery("User cancelled the command execution.");
+                    sendQuery("User cancelled the command execution.");
                     break;
                 }
 
@@ -1063,11 +890,11 @@ void OriAssistant::handleCommandExecution(const std::string& command, bool auto_
             std::cout << result << std::endl;
             pre_prompt_context += "The user executed the command `" + command + "` with the following output:\n---\n" + result + "\n---";
         }
-    } else {
-        std::cout << YELLOW << "Command execution cancelled." << RESET << "\n\n";
-        api->sendQuery("The user cancelled the command execution. Please inform the user that you cannot answer the question without running the command.");
+        } else {
+            std::cout << YELLOW << "Command execution cancelled." << RESET << "\n\n";
+            sendQuery("The user cancelled the command execution. Please inform the user that you cannot answer the question without running the command.");
     }
-}
+} // Closing brace for OriAssistant::handleCommandExecution
 
 void OriAssistant::setExecutablePath(const std::string& path) {
     executable_path = path;
@@ -1087,7 +914,7 @@ void OriAssistant::checkForUpdates(bool silent) {
 
         if (res == CURLE_OK) {
             std::ifstream version_file(".version");
-            std::string current_version = "1.1.4";
+            std::string current_version = "1.1.5";
             if (version_file.is_open()) {
                 std::getline(version_file, current_version);
                 version_file.close();
@@ -1145,6 +972,8 @@ void OriAssistant::showHelp() {
     std::cout << "  /clear         - Clear the screen\n";
     std::cout << "  /cat [file]    - Print file content and add it to the chat context\n";
     std::cout << "  /exec [cmd]    - Execute a shell command and add the output to the chat context\n";
+    std::cout << "  /autoexec [mode] - Set auto-execution mode for commands (ask, yes, no)\n";
+    std::cout << "  /model [id]    - Switch to a different API model configuration by ID\n";
     std::cout << "  Or type any query to send to the AI assistant\n\n";
     std::cout << "KEYBINDINGS:\n";
     std::cout << "  Ctrl+F         - Toggle command execution log\n";

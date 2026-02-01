@@ -5,8 +5,9 @@
 #include <filesystem>
 #include <functional>
 #include <unordered_map>
+#include <iostream>
 
-Config::Config() : port(8080), no_banner(false), no_clear(false), model("google/gemini-2.0-flash-exp:free"), debug(false) {}
+Config::Config() : port(8080), no_banner(false), no_clear(false), active_api_config("migrated-openrouter"), auto_execute_commands_mode("ask"), debug(false) {}
 
 ConfigManager::ConfigManager() {
     const char* home_dir = getenv("HOME");
@@ -32,7 +33,8 @@ void ConfigManager::loadConfig(Config& config) {
     config.port = root.get("port", 8448).asInt();
     config.no_banner = root.get("no_banner", false).asBool();
     config.no_clear = root.get("no_clear", true).asBool();
-    config.model = root.get("model", "qwen/qwen3-coder:free").asString();
+    config.active_api_config = root.get("active_api_config", "migrated-openrouter").asString();
+    config.auto_execute_commands_mode = root.get("auto_execute_commands_mode", "ask").asString();
     config.debug = root.get("debug", false).asBool();
 }
 
@@ -41,7 +43,8 @@ void ConfigManager::saveConfig(const Config& config) {
     root["port"] = config.port;
     root["no_banner"] = config.no_banner;
     root["no_clear"] = config.no_clear;
-    root["model"] = config.model;
+    root["active_api_config"] = config.active_api_config;
+    root["auto_execute_commands_mode"] = config.auto_execute_commands_mode;
     root["debug"] = config.debug;
 
     std::filesystem::path p(config_path);
@@ -69,7 +72,8 @@ void ConfigManager::loadExternalConfig(Config& config, const std::string& path) 
     config.port = root.get("port", 8080).asInt();
     config.no_banner = root.get("no_banner", false).asBool();
     config.no_clear = root.get("no_clear", false).asBool();
-    config.model = root.get("model", "google/gemini-2.0-flash-exp:free").asString();
+    config.active_api_config = root.get("active_api_config", "migrated-openrouter").asString();
+    config.auto_execute_commands_mode = root.get("auto_execute_commands_mode", "ask").asString();
     config.debug = root.get("debug", false).asBool();
 }
 
@@ -81,7 +85,14 @@ void ConfigManager::updateConfig(const std::string& key, const std::string& valu
         {"port", [](Config& c, const std::string& v){ c.port = std::stoi(v); }},
         {"no_banner", [](Config& c, const std::string& v){ c.no_banner = (v == "true"); }},
         {"no_clear", [](Config& c, const std::string& v){ c.no_clear = (v == "true"); }},
-        {"model", [](Config& c, const std::string& v){ c.model = v; }},
+        {"active_api_config", [](Config& c, const std::string& v){ c.active_api_config = v; }},
+        {"auto_execute_commands_mode", [](Config& c, const std::string& v){ 
+            if (v == "ask" || v == "yes" || v == "no") {
+                c.auto_execute_commands_mode = v; 
+            } else {
+                std::cerr << "Invalid value for auto_execute_commands_mode. Must be 'ask', 'yes', or 'no'." << std::endl;
+            }
+        }},
         {"debug", [](Config& c, const std::string& v){ c.debug = (v == "true"); }}
     };
 
@@ -101,7 +112,8 @@ std::string ConfigManager::getConfigValue(const std::string& key) {
         {"port", [](const Config& c){ return std::to_string(c.port); }},
         {"no_banner", [](const Config& c){ return c.no_banner ? "true" : "false"; }},
         {"no_clear", [](const Config& c){ return c.no_clear ? "true" : "false"; }},
-        {"model", [](const Config& c){ return c.model; }},
+        {"active_api_config", [](const Config& c){ return c.active_api_config; }},
+        {"auto_execute_commands_mode", [](const Config& c){ return c.auto_execute_commands_mode; }},
         {"debug", [](const Config& c){ return c.debug ? "true" : "false"; }}
     };
 
@@ -121,7 +133,8 @@ std::string ConfigManager::getAllConfig() {
     root["port"] = config.port;
     root["no_banner"] = config.no_banner;
     root["no_clear"] = config.no_clear;
-    root["model"] = config.model;
+    root["active_api_config"] = config.active_api_config;
+    root["auto_execute_commands_mode"] = config.auto_execute_commands_mode;
     root["debug"] = config.debug;
 
     Json::StreamWriterBuilder writer;

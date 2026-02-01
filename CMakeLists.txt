@@ -18,6 +18,8 @@ set(SOURCES
     src/core/ori_core.cpp
     src/core/ori_config.cpp
     src/core/ori_edit.cpp
+    src/core/ori_migration.cpp
+    src/core/ori_provider.cpp
     src/gui/gui.cpp
 )
 

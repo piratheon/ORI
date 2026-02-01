@@ -139,11 +139,21 @@ void ori::start_gui(int port)
 
     svr.Get("/api/models", [](const httplib::Request &, httplib::Response &res) {
         Json::Value models(Json::arrayValue);
-        models.append("x-ai/grok-4.1-fast:free");
-        models.append("cognitivecomputations/dolphin-mistral-24b-venice-edition:free");
-        models.append("qwen/qwen3-coder:free");
-        models.append("alibaba/tongyi-deepresearch-30b-a3b:free");
-        models.append("tngtech/deepseek-r1t2-chimera:free");
+        const char* home_dir = getenv("HOME");
+        if (home_dir != nullptr) {
+            std::string keys_path = std::string(home_dir) + "/.config/ori/keys.json";
+            std::ifstream keys_file(keys_path);
+            if (keys_file.is_open()) {
+                Json::Value keys_json;
+                keys_file >> keys_json;
+                for (const auto& key_entry : keys_json) {
+                    Json::Value model_info;
+                    model_info["id"] = key_entry.get("id", "");
+                    model_info["model"] = key_entry.get("model", "");
+                    models.append(model_info);
+                }
+            }
+        }
         res.set_content(models.toStyledString(), "application/json");
     });
     
@@ -184,10 +194,10 @@ void ori::start_gui(int port)
         reader.parse(req.body, root);
         std::string prompt = root["prompt"].asString();
         std::string session_id = root["session_id"].asString();
-        std::string model = root["model"].asString();
+        std::string api_config_id = root["model"].asString(); // Still named "model" in the frontend for now
 
         if (g_debug_enabled_in_gui_mode) {
-            std::cout << "Debug: Received /api/prompt request. Prompt: '" << prompt << "', Session ID: '" << session_id << "', Model: '" << model << "'" << std::endl;
+            std::cout << "Debug: Received /api/prompt request. Prompt: '" << prompt << "', Session ID: '" << session_id << "', API Config ID: '" << api_config_id << "'" << std::endl;
         }
 
         if (session_id.empty()) {
@@ -195,8 +205,11 @@ void ori::start_gui(int port)
         }
 
         OriAssistant assistant;
-        assistant.api->setSystemPrompt(GUI_SYSTEM_PROMPT);
-        assistant.api->setIsGui(true);
+        assistant.setSystemPrompt(GUI_SYSTEM_PROMPT);
+        if (!api_config_id.empty()) {
+            assistant.config.active_api_config = api_config_id;
+        }
+
         if (!assistant.initialize()) {
             Json::Value err;
             err["error"] = "Failed to initialize assistant";
@@ -207,15 +220,7 @@ void ori::start_gui(int port)
             return;
         }
 
-        // Apply model selection after initialization so config does not override it
-        if (!model.empty()) {
-            assistant.api->setModel(model);
-            if (g_debug_enabled_in_gui_mode) {
-                std::cout << "Debug: Model set to " << model << std::endl;
-            }
-        }
-
-        std::string response = assistant.api->sendQuery(prompt);
+        std::string response = assistant.sendQuery(prompt);
         
         if (g_debug_enabled_in_gui_mode) {
             std::cout << "Debug: API response for prompt '" << prompt << "': " << response.substr(0, std::min((int)response.length(), 100)) << "..." << std::endl; // Log first 100 chars

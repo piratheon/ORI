@@ -366,7 +366,7 @@ body {
 // --- PRESERVED LOGIC + ENHANCEMENTS ---
 let isCanvasOpen = false;
 let current_session_id = null;
-let selected_model = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free";
+let selected_api_config_id = null;
 let last_user_prompt = "";
 let running_commands = {};
 
@@ -602,7 +602,7 @@ async function sendMessage(prompt = null, isFollowUp = false) {
   const response = await fetch('/api/prompt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: text, session_id: current_session_id, model: selected_model })
+    body: JSON.stringify({ prompt: text, session_id: current_session_id, model: selected_api_config_id })
   });
   const result = await response.json();
   updateStatus('idle', 'Idle');
@@ -650,23 +650,37 @@ async function getModels() {
   const modelOptionsContainer = document.getElementById('model-options-container');
   const currentModelDisplay = document.getElementById('current-model-display');
   modelOptionsContainer.innerHTML = '';
-  models.forEach(model => {
-    const button = document.createElement('button');
-    button.className = 'w-full text-left px-4 py-3 text-sm text-md-sys-color-onSurfaceVariant hover:bg-md-sys-color-surfaceContainerHighest hover:text-md-sys-color-onSurface transition-colors rounded-xl flex items-center gap-3 group';
-    button.setAttribute('role', 'menuitem');
-    const modelName = model.split('/').pop().replace(':free', '');
-    button.innerHTML = `
-      <div class="w-1 h-1 rounded-full bg-md-sys-color-outline group-hover:bg-md-sys-color-primary transition-colors"></div>
-      <span class="truncate">${modelName}</span>
-    `;
-    button.onclick = () => {
-      selected_model = model;
-      currentModelDisplay.textContent = modelName;
-    };
-    modelOptionsContainer.appendChild(button);
-  });
-  currentModelDisplay.textContent = selected_model.split('/').pop().replace(':free', '');
+
+  if (models.length > 0) {
+    if (!selected_api_config_id) {
+        selected_api_config_id = models[0].id;
+    }
+    
+    models.forEach(model_info => {
+        const button = document.createElement('button');
+        button.className = 'w-full text-left px-4 py-3 text-sm text-md-sys-color-onSurfaceVariant hover:bg-md-sys-color-surfaceContainerHighest hover:text-md-sys-color-onSurface transition-colors rounded-xl flex items-center gap-3 group';
+        button.setAttribute('role', 'menuitem');
+        
+        button.innerHTML = `
+          <div class="w-1 h-1 rounded-full bg-md-sys-color-outline group-hover:bg-md-sys-color-primary transition-colors"></div>
+          <span class="truncate">${model_info.model}</span>
+        `;
+        button.onclick = () => {
+          selected_api_config_id = model_info.id;
+          currentModelDisplay.textContent = model_info.model;
+        };
+        modelOptionsContainer.appendChild(button);
+    });
+    
+    const current_model_info = models.find(m => m.id === selected_api_config_id) || models[0];
+    currentModelDisplay.textContent = current_model_info.model;
+    selected_api_config_id = current_model_info.id;
+
+  } else {
+    currentModelDisplay.textContent = "No models configured";
+  }
 }
+
 
 async function getChats() {
   const response = await fetch('/api/chats');
