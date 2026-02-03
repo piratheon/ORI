@@ -1,36 +1,25 @@
-```
-    ███████    ███████████   █████            ███████████ █████  █████ █████
-  ███▒▒▒▒▒███ ▒▒███▒▒▒▒▒███ ▒▒███            ▒█▒▒▒███▒▒▒█▒▒███  ▒▒███ ▒▒███ 
- ███     ▒▒███ ▒███    ▒███  ▒███            ▒   ▒███  ▒  ▒███   ▒███  ▒███ 
-▒███      ▒███ ▒██████████   ▒███  ██████████    ▒███     ▒███   ▒███  ▒███ 
-▒███      ▒███ ▒███▒▒▒▒▒███  ▒███ ▒▒▒▒▒▒▒▒▒▒     ▒███     ▒███   ▒███  ▒███ 
-▒▒███     ███  ▒███    ▒███  ▒███                ▒███     ▒███   ▒███  ▒███ 
- ▒▒▒███████▒   █████   █████ █████               █████    ▒▒████████   █████
-   ▒▒▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒               ▒▒▒▒▒      ▒▒▒▒▒▒▒▒   ▒▒▒▒▒
-```
+<h1 align=center> <img src="www/favicon.svg" height"28" width="28"/> ORI - TUI</h1>
 
-A terminal‑first AI assistant for Linux with both a Text User Interface (TUI) and a web-based Graphical User Interface (GUI). Integrates with OpenRouter (Groq and G4F will be supported soon) to access multiple LLMs. Built for developers, power users, and sysadmins who want to run AI workflows from the terminal or the browser.
+<div align=center>
+
+![GitHub last commit](https://img.shields.io/github/last-commit/piratheon/ori?style=for-the-badge&labelColor=101418&color=9ccbfb)
+![GitHub Repo stars](https://img.shields.io/github/stars/piratheon/ori?style=for-the-badge&labelColor=101418&color=b9c8da)
+![GitHub repo size](https://img.shields.io/github/repo-size/piratheon/ori?style=for-the-badge&labelColor=101418&color=d3bfe6)
+
+</div>
+
+
+> A terminal‑first AI assistant for Linux with both a Text User Interface (TUI) and a web-based Graphical User Interface (GUI). Integrates with OpenRouter (Groq and G4F will be supported soon) to access multiple LLMs. Built for developers, power users, and sysadmins who want to run AI workflows from the terminal or the browser.
 
 ## Quick links
 - GitHub: https://github.com/piratheon/ori
 - AUR: https://aur.archlinux.org/packages/ori
-- AUR-GitLab: https://gitlab.archlinux.org/piratheon/ori
-- OpenRouter keys: https://openrouter.ai/settings/keys
-
-## Features
-
 ### Core
 - **OpenRouter integration:** Connect to multiple AI models.
 - **Auto-retry:** Automatically retries on transient network errors and rate limiting.
 - **Plugin system & Orpm:** Extendable architecture with package management.
-- **Secure API key handling:** API key stored at `~/.config/ori/key`.
-- **Automatic update checks** on startup.
-- **Persistent config:** `~/.config/ori/config.json`.
 
 ### TUI (Terminal)
-- Interactive conversation with session context.
-- Slash commands: `/help`, `/clear`, `/quit`, `/cat`, `/exec`.
-- Command execution log with `Ctrl+F` toggle.
 - Agentic command execution with confirmation.
 - Multiline input and editor-friendly UX.
 - Keybindings:
@@ -61,23 +50,17 @@ A terminal‑first AI assistant for Linux with both a Text User Interface (TUI) 
 ### Build from source
 1. Clone:
    ```
-   git clone https://github.com/piratheon/ori.git
    cd ori
    ```
 2. Build (automated):
    ```
    ./build.sh
    ```
-   or manual:
-   ```
-   mkdir build && cd build
    cmake ..
    make
-   ```
 3. Executable will be at `build/ori`.
 
 ### Arch (AUR)
-- Install with an AUR helper:
   ```
   yay -S aur/ori
   ```
@@ -95,15 +78,8 @@ Examples:
   ```
 - Load a JSON config:
   ```
-  ./build/ori --config load /path/to/settings.json
-  ```
- - Print a config value or all values:
-   ```
    ./build/ori --config cat model
    ./build/ori --config cat all
-   ```
-
-## Usage
 
 ### TUI (interactive)
 Start the interactive assistant:
@@ -114,6 +90,9 @@ Useful flags:
 - `--help` — show CLI help
 - `--version` — print version
 - `/help`, `/clear`, `/quit`, `/cat`, `/exec` — available inside TUI
+- `/autoexec [ask|yes|no]` — set auto-execute mode for commands: `ask` (prompt before executing), `yes` (automatically confirm and run), or `no` (never auto-execute). This value is saved to the persistent config.
+- `/model <api_config_id>` — switch the active API/provider by its configuration id (as defined in your `keys.json`). If the id is not found the CLI will list available models.
+- `/thinking` — activate the provider configured with the `role` set to `thinking` (if any). If no such provider is configured, a message will notify you.
 
 ### Non-interactive
 Run a one-off prompt:
@@ -140,13 +119,12 @@ Project layout:
 ├── CMakeLists.txt   # CMake build file
 ├── install.sh             # install script
 ├── aur                      # AUR  files
-├── build                   # build output
-├── include               # header files
-│   └── external       # external library headers
-├── src                      # source files
-│   ├── core             # core logic
-│   └──  gui             # GUI server code
-└── www                # GUI assets
+├── include              # header files
+│   └── external         # third-party headers
+├── src                 # source files
+│   ├── core          # core source files
+│   └── gui             # GUI logic source files
+└── www                # web assets
     ├── css
     ├── lib
     └── webfonts
@@ -158,6 +136,7 @@ Build & iterate locally
 Contributions, issues, and PRs welcome. Open an issue to discuss larger changes before submitting PRs. Follow standard fork → branch → PR workflow.
 
 ## Changelog (1.x.x)
+- 1.1.5 — Multi-API support (OpenRouter, Google, Hugging Face), centralized API key management (`keys.json`), first-use experience, new interactive commands (`/autoexec`, `/model`, `/thinking`), conditional debugging, and bug fixes.
 - 1.1.4 — Remove old plugin manager and files; refactor config, GUI, edits, backup/restore, and streamline main/CMakelists.
 - 1.1.3 — Fix Ctrl+C doesn't work on WebUI mode, and add a new debug option, also improve scripts to detect current distro and install deps for it.
 - 1.1.2 — New cat command to print current configurations values.
@@ -167,3 +146,14 @@ Contributions, issues, and PRs welcome. Open an issue to discuss larger changes 
 
 ## License
 GNU GPL-3.0 — see [LICENSE](LICENSE)  file.
+## ASCII Art
+```
+    ███████    ███████████   █████            ███████████ █████  █████ █████
+  ███▒▒▒▒▒███ ▒▒███▒▒▒▒▒███ ▒▒███            ▒█▒▒▒███▒▒▒█▒▒███  ▒▒███ ▒▒███ 
+ ███     ▒▒███ ▒███    ▒███  ▒███            ▒   ▒███  ▒  ▒███   ▒███  ▒███ 
+▒███      ▒███ ▒██████████   ▒███  ██████████    ▒███     ▒███   ▒███  ▒███ 
+▒███      ▒███ ▒███▒▒▒▒▒███  ▒███ ▒▒▒▒▒▒▒▒▒▒     ▒███     ▒███   ▒███  ▒███ 
+▒▒███     ███  ▒███    ▒███  ▒███                ▒███     ▒███   ▒███  ▒███ 
+ ▒▒▒███████▒   █████   █████ █████               █████    ▒▒████████   █████
+   ▒▒▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒               ▒▒▒▒▒      ▒▒▒▒▒▒▒▒   ▒▒▒▒▒
+``` 

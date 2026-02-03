@@ -1,5 +1,6 @@
 #include "ori_core.h"
 #include "ori_gui.h"
+#include "ori_migration.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -113,7 +114,7 @@ I am here to be your reliable partner in the terminal. Let me know what you need
 )ORI_PROMPT";
 
 void showUsage() {
-    std::cout << "ORI Terminal Assistant v1.1.4 - Linux TUI AI Assistant\n";
+    std::cout << "ORI Terminal Assistant v1.1.5 - Linux TUI AI Assistant\n";
     std::cout << "Usage: ori [options] [prompt]\n\n";
     std::cout << "Options:\n";
     std::cout << "  -h, --help              Show this help message\n";
@@ -137,12 +138,12 @@ void showUsage() {
 }
 
 void showVersion() {
-    std::cout << "ORI Terminal Assistant v1.1.4\n";
+    std::cout << "ORI Terminal Assistant v1.1.5\n";
 }
 
 void processDirectPrompt(OriAssistant& assistant, const std::string& prompt, bool auto_confirm) {
     // Get response directly without showing the prompt again
-    std::string response = assistant.api->sendQuery(prompt);
+    std::string response = assistant.sendQuery(prompt);
     assistant.handleResponse(response, auto_confirm);
 }
 
@@ -150,9 +151,21 @@ void processDirectPrompt(OriAssistant& assistant, const std::string& prompt, boo
 
 int main(int argc, char* argv[]) {
     std::string executable_path = argv[0];
+
+    // Create a temporary assistant just to load the config to pass to MigrationManager
+    OriAssistant temp_assistant;
+    temp_assistant.configManager.loadConfig(temp_assistant.config);
+
+    const char* home_dir = getenv("HOME");
+    if (home_dir != nullptr) {
+        std::string config_dir = std::string(home_dir) + "/.config/ori";
+        MigrationManager migration_manager(config_dir, temp_assistant.config.debug);
+        migration_manager.run();
+    }
+
     OriAssistant assistant;
     assistant.setExecutablePath(executable_path);
-    assistant.api->setSystemPrompt(SYSTEM_PROMPT);
+    assistant.setSystemPrompt(SYSTEM_PROMPT);
     if (!assistant.initialize()) {
         std::cerr << "Failed to initialize ORI Terminal Assistant. Please check your API key configuration.\n";
         return 1;
@@ -201,7 +214,7 @@ int main(int argc, char* argv[]) {
     };
     arg_handlers["-m"] = arg_handlers["--model"] = [&](int i, const std::vector<std::string>& args) {
         if (i + 1 < args.size()) {
-            assistant.config.model = args[i + 1];
+            assistant.config.active_api_config = args[i + 1];
             return 2;
         }
         return 1;
