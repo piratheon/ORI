@@ -11,6 +11,16 @@
 
 > A terminal‑first AI assistant for Linux with both a Text User Interface (TUI) and a web-based Graphical User Interface (GUI). Integrates with OpenRouter (Groq and G4F will be supported soon) to access multiple LLMs. Built for developers, power users, and sysadmins who want to run AI workflows from the terminal or the browser.
 
+> [!IMPORTANT]
+> This repository is currently archived and not actively maintained. Development has been paused due to time constraints and competing priorities.
+
+**Why archived?**
+- Ori represents an ambitious integration of multiple technologies (C++/Textual TUI, multi-LLM orchestration, web UI etc ...) that requires sustained focus to maintain and evolve responsibly. Current commitments (education) limit capacity for meaningful updates.
+
+**Will this resume?**
+- Possibly. If circumstances change and development capacity returns, this will be unarchived and development will resume. The codebase is preserved in a working state for that eventuality.
+
+---
 ## Quick links
 - GitHub: https://github.com/piratheon/ori
 - AUR: https://aur.archlinux.org/packages/ori
